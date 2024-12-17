@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use vtkio::model::{CellType, Cells, VertexNumbers};
 use vtkio::*;
 
-
 #[derive(Event)]
 pub struct OpenFileEvent;
 
@@ -98,53 +97,52 @@ fn load_resource(
     for LoadModelEvent(path) in load_events.read() {
         match path.extension().and_then(|ext| ext.to_str()) {
             Some("obj") => {
-                commands.spawn(PbrBundle {
-                    mesh: asset_server.load(format!("{}", path.to_string_lossy())),
-                    material: materials.add(StandardMaterial {
+                commands.spawn((
+                    Mesh3d(asset_server.load(format!("{}", path.to_string_lossy()))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::srgb(0.8, 0.7, 0.6),
                         metallic: 0.0,
                         perceptual_roughness: 0.5,
                         ..default()
-                    }),
-                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    ..default()
-                });
+                    })),
+                ));
             }
             Some("gltf") | Some("glb") => {
-                commands.spawn(SceneBundle {
-                    scene: asset_server.load(format!("{}#Scene0", path.to_string_lossy())),
-                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    ..default()
-                });
+                commands.spawn((
+                    SceneRoot(asset_server.load(format!("{}#Scene0", path.to_string_lossy()))),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                    Visibility::Visible,
+                ));
             }
             Some("vtk") => {
                 let vtk_path = PathBuf::from(format!("{}", path.to_string_lossy()));
-                let vtk_file =
-                    Vtk::import(&vtk_path).expect(&format!("Failed to load file: {:?}", &vtk_path));
+                let vtk_file = Vtk::import(&vtk_path)
+                    .unwrap_or_else(|_| panic!("Failed to load file: {:?}", &vtk_path));
 
                 // match enum vtk.data
                 if let Some(mesh) = process_vtk_mesh(&vtk_file) {
-                    commands.spawn((PbrBundle {
-                        mesh: meshes.add(mesh.clone()),
-                        material: materials.add(StandardMaterial {
-                            base_color: Color::srgb(0.8, 0.7, 0.6),
+                    commands.spawn((
+                        Mesh3d(meshes.add(mesh.clone())),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: Color::srgb(0.7, 0.7, 0.7),
                             metallic: 0.0,
                             perceptual_roughness: 0.5,
-                            double_sided: true,
+                            reflectance: 0.1,
                             ..default()
-                        }),
-                        transform: Transform::from_xyz(0.0, 0.0, 0.0)
-                            .with_rotation(Quat::from_euler(EulerRot::XYZ, std::f32::consts::PI / 2.0, std::f32::consts::PI / 4.0,0.0)),
-                        ..default()
-                    },
-                    Model)
-                    );
+                        })),
+                        Transform::from_xyz(0.0, 0.0, 0.0).with_rotation(Quat::from_euler(
+                            EulerRot::XYZ,
+                            std::f32::consts::PI / 2.0,
+                            std::f32::consts::PI / 4.0,
+                            0.0,
+                        )),
+                        Visibility::Visible,
+                        Model,
+                    ));
 
                     // 在spawn后添加
                     println!("Spawned mesh with vertices: {:?}", mesh.count_vertices());
                     // TODO: Check vertices correct or not
-
-
                 }
             }
             _ => println!("do not support other formats now. Please choose another model."),
@@ -281,6 +279,3 @@ fn process_vtk_cells(
         }
     }
 }
-
-
-

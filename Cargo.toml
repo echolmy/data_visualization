@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.14.2"
-bevy_egui = "0.30"
+bevy = "0.15.0"
+bevy_egui = "0.31.1"
 rfd = "0.15.0"
-bevy_obj = "0.14"
+bevy_obj = "0.15.0"
 vtkio = "0.7.0-rc1"
 
 
