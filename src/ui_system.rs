@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 use bevy_egui::*;
-
-use bevy::reflect::List;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
 use rfd::FileDialog;
@@ -186,8 +184,9 @@ fn process_vtk_mesh(vtk: &Vtk) -> Option<Mesh> {
                             &mut indices_per_piece,
                             &grid_piece.cells,
                         );
-                        indices_all_pieces.push(indices_per_piece.clone());
-                        indices.append(&mut indices_per_piece.clone());
+                        
+                        indices.append(&mut indices_per_piece);
+                        indices_all_pieces.push(indices_per_piece);
                     }
 
                     // Piece::{Source, Loaded}
@@ -217,13 +216,14 @@ fn process_vtk_mesh(vtk: &Vtk) -> Option<Mesh> {
 }
 
 fn process_vtk_cells(
-    vertices_per_piece: Vec<[f32; 3]>,
+    // TODO: Unused variable
+    _vertices_per_piece: Vec<[f32; 3]>,
     indices_per_piece: &mut Vec<u32>,
     cells: &Cells,
 ) {
     match &cells.cell_verts {
         VertexNumbers::Legacy {
-            num_cells,
+            num_cells: _,
             vertices,
         } => {
             // read data from vertices
@@ -252,19 +252,6 @@ fn process_vtk_cells(
                             vertex_indices[3], // face 4
                         ]);
                     }
-                    // CellType::VTK_HEXAHEDRON => {
-                    //     add_hexahedron_faces(indices_per_piece, vertex_indices);
-                    // },
-                    // CellType::VTK_TRIANGLE => {
-                    //     indices_per_piece.extend_from_slice(vertex_indices);
-                    // },
-                    // CellType::VTK_QUAD => {
-                    //     // 将四边形分解为两个三角形
-                    //     indices_per_piece.extend_from_slice(&[
-                    //         vertex_indices[0], vertex_indices[1], vertex_indices[2],
-                    //         vertex_indices[0], vertex_indices[2], vertex_indices[3],
-                    //     ]);
-                    // },
                     _ => println!("TODO: Unsupported cell type: {:?}", cell_type),
                 }
                 current_index += 1 + n_vertices;

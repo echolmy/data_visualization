@@ -14,7 +14,7 @@ fn main() {
         .add_plugins(ObjPlugin)
         .add_plugins(UIPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, (update_transform))
+        .add_systems(Update, update_transform)
         .run();
 }
 
