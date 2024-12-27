@@ -1,11 +1,11 @@
 mod camera;
-mod ui_system;
+mod mesh;
+mod ui;
 
 use bevy::prelude::*;
 use bevy_egui::*;
 use bevy_obj::ObjPlugin;
-use ui_system::Model;
-use ui_system::UIPlugin;
+use ui::UIPlugin;
 
 fn main() {
     App::new()
@@ -94,7 +94,7 @@ fn setup(mut commands: Commands) {
 //     }
 // }
 
-fn update_transform(mut query: Query<&mut Transform, With<Model>>) {
+fn update_transform(mut query: Query<&mut Transform, With<ui::Model>>) {
     for mut transform in &mut query {
         transform.rotate_y(0.01);
         // transform.rotate_z(0.01);
