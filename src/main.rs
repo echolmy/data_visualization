@@ -5,6 +5,7 @@ mod ui;
 use bevy::prelude::*;
 use bevy_egui::*;
 use bevy_obj::ObjPlugin;
+use camera::CameraPlugin;
 use ui::UIPlugin;
 
 fn main() {
@@ -13,6 +14,7 @@ fn main() {
         .add_plugins(EguiPlugin)
         .add_plugins(ObjPlugin)
         .add_plugins(UIPlugin)
+        .add_plugins(CameraPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, update_transform)
         .run();
@@ -26,11 +28,6 @@ fn setup(mut commands: Commands) {
             ..default()
         },
         Transform::from_translation(Vec3::new(5.0, 5.0, 0.0)),
-    ));
-    // camera
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(2.0, 2.0, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 

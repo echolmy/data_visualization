@@ -5,11 +5,6 @@ use std::path::PathBuf;
 use vtkio::model::{CellType, Cells, VertexNumbers};
 use vtkio::*;
 
-// #[derive(Debug)]
-// pub enum VtkError {
-//     ParseError { message: String },
-// }
-
 pub fn load_vtk(path: &PathBuf) -> Vtk {
     let vtk_path = PathBuf::from(format!("{}", path.to_string_lossy()));
     if let Ok(vtk_file) = Vtk::import(&vtk_path) {
@@ -17,11 +12,6 @@ pub fn load_vtk(path: &PathBuf) -> Vtk {
     } else {
         panic!("Failed to load VTK file: {}", vtk_path.display());
     }
-
-    // match Vtk::import(&vtk_path) {
-    //     Ok(vtk_file) => Ok(vtk_file),
-    //     Err(err) => panic!("Failed to load VTK file: {}: {}", vtk_path.display(), err),
-    // }
 }
 pub fn process_vtk_mesh(vtk: &Vtk) -> Option<Mesh> {
     let mut mesh = Mesh::new(
