@@ -16,7 +16,7 @@ fn main() {
         .add_plugins(UIPlugin)
         .add_plugins(CameraPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, update_transform)
+        // .add_systems(Update, update_transform)
         .run();
 }
 
@@ -91,10 +91,10 @@ fn setup(mut commands: Commands) {
 //     }
 // }
 
-fn update_transform(mut query: Query<&mut Transform, With<ui::Model>>) {
-    for mut transform in &mut query {
-        transform.rotate_y(0.01);
-        // transform.rotate_z(0.01);
-        // transform.rotate_x(0.01);
-    }
-}
+// fn update_transform(mut query: Query<&mut Transform, With<ui::Model>>) {
+//     for mut transform in &mut query {
+//         transform.rotate_y(0.01);
+//         // transform.rotate_z(0.01);
+//         // transform.rotate_x(0.01);
+//     }
+// }

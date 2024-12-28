@@ -1,31 +1,10 @@
 mod events;
 
 use crate::mesh::vtk;
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
-
-#[derive(Component)]
-pub struct Model;
-// // TODO: change to the other file
-// #[derive(Debug)]
-// struct MeshData {
-//     // geometry data
-//     vertices: Vec<[f32; 3]>,
-//     triangles: Vec<[u32; 3]>,
-//     Tetra: Vec<[u32; 4]>,
-// }
-//
-// impl MeshData {
-//     fn new() -> Self {
-//         Self {
-//             vertices: Vec::new(),
-//             triangles: Vec::new(),
-//             Tetra: Vec::new(),
-//         }
-//     }
-// }
 
 pub struct UIPlugin;
 impl Plugin for UIPlugin {
@@ -83,12 +62,15 @@ fn load_resource(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut load_events: EventReader<events::LoadModelEvent>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
+    let window = window_query.get_single().unwrap();
     for events::LoadModelEvent(path) in load_events.read() {
         match path.extension().and_then(|ext| ext.to_str()) {
             Some("obj") => {
                 commands.spawn((
                     Mesh3d(asset_server.load(format!("{}", path.to_string_lossy()))),
+                    Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -5.0),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::srgb(0.8, 0.7, 0.6),
                         metallic: 0.0,
@@ -120,14 +102,14 @@ fn load_resource(
                             reflectance: 0.1,
                             ..default()
                         })),
-                        Transform::from_xyz(0.0, 0.0, 0.0).with_rotation(Quat::from_euler(
-                            EulerRot::XYZ,
-                            std::f32::consts::PI / 2.0,
-                            std::f32::consts::PI / 4.0,
-                            0.0,
-                        )),
+                        Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -5.0)
+                            .with_rotation(Quat::from_euler(
+                                EulerRot::XYZ,
+                                std::f32::consts::PI / 2.0,
+                                std::f32::consts::PI / 4.0,
+                                0.0,
+                            )),
                         Visibility::Visible,
-                        Model,
                     ));
 
                     // 在spawn后添加
