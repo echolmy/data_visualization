@@ -3,6 +3,7 @@ use bevy::input::{
     ButtonInput,
 };
 use bevy::{prelude::*, window::PrimaryWindow};
+use bevy_atmosphere::prelude::*;
 
 const MOVEMENT_SPEED: f32 = 5.0;
 const ZOOM_SPEED: f32 = 20.0;
@@ -41,7 +42,8 @@ impl Default for CameraRotationController {
 pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_camera)
+        app.add_plugins(AtmospherePlugin)
+            .add_systems(Startup, spawn_camera)
             .add_systems(Update, camera_controller);
     }
 }
@@ -50,6 +52,7 @@ fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<Primar
     let window = window_query.get_single().unwrap();
     commands.spawn((
         WorldModelCamera,
+        AtmosphereCamera::default(),
         CameraRotationController::default(),
         Camera3d::default(),
         Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 0.0),
