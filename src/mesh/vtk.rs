@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
 use std::path::PathBuf;
-use vtkio::model::{CellType, Cells, Piece, UnstructuredGridPiece, VertexNumbers};
+use vtkio::model::{CellType, Piece, UnstructuredGridPiece};
 use vtkio::*;
 
 pub fn load_vtk(path: &PathBuf) -> Vtk {
