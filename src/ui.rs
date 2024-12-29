@@ -79,20 +79,21 @@ fn load_resource(
                     })),
                 ));
             }
-            Some("gltf") | Some("glb") => {
-                commands.spawn((
-                    SceneRoot(asset_server.load(format!("{}#Scene0", path.to_string_lossy()))),
-                    Transform::from_xyz(0.0, 0.0, 0.0),
-                    Visibility::Visible,
-                ));
-            }
+            // Some("gltf") | Some("glb") => {
+            //     commands.spawn((
+            //         SceneRoot(asset_server.load(format!("{}#Scene0", path.to_string_lossy()))),
+            //         Transform::from_xyz(0.0, 0.0, 0.0),
+            //         Visibility::Visible,
+            //     ));
+            // }
+            // legacy format
             Some("vtk") => {
                 // let vtk_path = PathBuf::from(format!("{}", path.to_string_lossy()));
                 // let vtk_file = Vtk::import(&vtk_path)
                 //     .unwrap_or_else(|_| panic!("Failed to load file: {:?}", &vtk_path));
                 let vtk_file = vtk::load_vtk(path);
                 // match enum vtk.data
-                if let Some(mesh) = vtk::process_vtk_mesh(&vtk_file) {
+                if let Some(mesh) = vtk::process_vtk_mesh_legacy(&vtk_file) {
                     commands.spawn((
                         Mesh3d(meshes.add(mesh.clone())),
                         MeshMaterial3d(materials.add(StandardMaterial {
