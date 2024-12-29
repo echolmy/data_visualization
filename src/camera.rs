@@ -92,11 +92,11 @@ fn camera_controller(
             movement += transform.right() * MOVEMENT_SPEED;
         }
 
-        if keyboard_input.pressed(KeyCode::Space) {
+        if keyboard_input.pressed(KeyCode::KeyQ) {
             movement += transform.up() * MOVEMENT_SPEED;
         }
 
-        if keyboard_input.pressed(KeyCode::KeyC) {
+        if keyboard_input.pressed(KeyCode::KeyE) {
             movement += transform.down() * MOVEMENT_SPEED;
         }
 
