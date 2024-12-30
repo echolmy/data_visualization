@@ -13,13 +13,13 @@ pub fn load_vtk(path: &PathBuf) -> Vtk {
         panic!("Failed to load VTK file: {}", vtk_path.display());
     }
 }
-pub fn process_vtk_mesh_legacy(vtk: &Vtk) -> Option<Mesh> {
+pub fn process_vtk_mesh_legacy(vtk: Vtk) -> Option<Mesh> {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
 
-    match &vtk.data {
+    match vtk.data {
         // 1. UnstructuredGrid
         model::DataSet::UnstructuredGrid { meta: _, pieces } => {
             _process_legacy_unstructured_grid(&mut mesh, pieces);
@@ -32,26 +32,30 @@ pub fn process_vtk_mesh_legacy(vtk: &Vtk) -> Option<Mesh> {
     }
 }
 
-fn _process_legacy_unstructured_grid(mesh: &mut Mesh, pieces: &[Piece<UnstructuredGridPiece>]) {
+fn _process_legacy_unstructured_grid(
+    mesh: &mut Mesh,
+    mut pieces: Vec<Piece<UnstructuredGridPiece>>,
+) {
     let mut vertices: Vec<[f32; 3]> = Vec::new();
     let indices: Vec<u32>;
     // legacy should be only one piece::inline
 
     // 1. process geometry data
-    if let Piece::Inline(piece_ptr) = pieces
-        .get(0)
-        .expect("[Legacy format] Pieces array is empty. Please check")
-    {
-        // 1.1 process point position
-        let points = piece_ptr
-            .points
-            .cast_into::<f32>()
-            .expect("IOBuffer converted failed.");
-        vertices.reserve(piece_ptr.num_points());
-        vertices = points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
+    if let Some(Piece::Inline(_)) = pieces.first() {
+        if let Piece::Inline(piece_ptr) = pieces.remove(0) {
+            // 1.1 process point position
+            let points = piece_ptr
+                .points
+                .cast_into::<f32>()
+                .expect("IOBuffer converted failed.");
+            vertices.reserve(piece_ptr.num_points());
+            vertices = points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
 
-        // 1.2. process point indices to construct triangle
-        indices = _process_legacy_unstructuredgrid_cells_triangle(piece_ptr);
+            // 1.2. process point indices to construct triangle
+            indices = _process_legacy_unstructuredgrid_cells_triangle(piece_ptr);
+        } else {
+            panic!("[Legacy format] Pieces array is empty. Please check.")
+        }
     } else {
         panic!("First piece must be an Inline piece")
     }
@@ -70,7 +74,7 @@ fn _process_legacy_unstructured_grid(mesh: &mut Mesh, pieces: &[Piece<Unstructur
 }
 
 fn _process_legacy_unstructuredgrid_cells_triangle(
-    piece_ptr: &Box<UnstructuredGridPiece>,
+    piece_ptr: Box<UnstructuredGridPiece>,
 ) -> Vec<u32> {
     // check every cell type
     for _type in &piece_ptr.cells.types {
@@ -81,7 +85,7 @@ fn _process_legacy_unstructuredgrid_cells_triangle(
     let mut indices: Vec<u32> = Vec::with_capacity(piece_ptr.cells.num_cells() * 3);
 
     // clone operation cannot avoid because of `into_legacy()` operation
-    let cell_data = piece_ptr.cells.cell_verts.clone().into_legacy();
+    let cell_data = piece_ptr.cells.cell_verts.into_legacy();
 
     if cell_data.1.len() % 4 != 0 {
         panic!("number of [CELLS] are not multiply of 4.")
