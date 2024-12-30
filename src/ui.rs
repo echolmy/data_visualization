@@ -103,7 +103,7 @@ fn load_resource(
                             reflectance: 0.1,
                             ..default()
                         })),
-                        Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -5.0)
+                        Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -1.0)
                             .with_rotation(Quat::from_euler(
                                 EulerRot::XYZ,
                                 std::f32::consts::PI / 2.0,

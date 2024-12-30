@@ -51,7 +51,7 @@ fn _process_legacy_unstructured_grid(mesh: &mut Mesh, pieces: &[Piece<Unstructur
         vertices = points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
 
         // 1.2. process point indices to construct triangle
-        indices = _process_legacy_unstructuredgrid_cells_triangle(piece_ptr.clone());
+        indices = _process_legacy_unstructuredgrid_cells_triangle(piece_ptr);
     } else {
         panic!("First piece must be an Inline piece")
     }
@@ -70,7 +70,7 @@ fn _process_legacy_unstructured_grid(mesh: &mut Mesh, pieces: &[Piece<Unstructur
 }
 
 fn _process_legacy_unstructuredgrid_cells_triangle(
-    piece_ptr: Box<UnstructuredGridPiece>,
+    piece_ptr: &Box<UnstructuredGridPiece>,
 ) -> Vec<u32> {
     // check every cell type
     for _type in &piece_ptr.cells.types {
@@ -79,7 +79,9 @@ fn _process_legacy_unstructuredgrid_cells_triangle(
         }
     }
     let mut indices: Vec<u32> = Vec::with_capacity(piece_ptr.cells.num_cells() * 3);
-    let cell_data = piece_ptr.cells.cell_verts.into_legacy();
+
+    // clone operation cannot avoid because of `into_legacy()` operation
+    let cell_data = piece_ptr.cells.cell_verts.clone().into_legacy();
 
     if cell_data.1.len() % 4 != 0 {
         panic!("number of [CELLS] are not multiply of 4.")
