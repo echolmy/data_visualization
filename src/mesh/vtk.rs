@@ -26,11 +26,11 @@ impl UnstructuredGridProcessor {
     }
     fn _process_vertices(&self, points: &IOBuffer) -> Vec<[f32; 3]> {
         // process point position
-
-        points
+        let points = points
             .cast_into::<f32>()
-            .map(|points| points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect())
-            .expect("IOBuffer converted failed.")
+            .expect("IOBuffer converted failed.");
+        // construct position of each vertices
+        points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect()
     }
 
     fn _process_cell_indices(&self, cells: model::Cells) -> Vec<u32> {
