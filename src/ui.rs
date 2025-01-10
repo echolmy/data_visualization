@@ -86,14 +86,15 @@ fn load_resource(
             //         Visibility::Visible,
             //     ));
             // }
-            // legacy format
+            // VTK extension:
+            // Legacy: .vtk
             Some("vtk") => {
                 // let vtk_path = PathBuf::from(format!("{}", path.to_string_lossy()));
                 // let vtk_file = Vtk::import(&vtk_path)
                 //     .unwrap_or_else(|_| panic!("Failed to load file: {:?}", &vtk_path));
-                let vtk_file = vtk::load_vtk(path);
+                // let vtk_file = vtk::load_vtk(path);
                 // match enum vtk.data
-                if let Some(mesh) = vtk::process_vtk_mesh_legacy(vtk_file) {
+                if let Some(mesh) = vtk::process_vtk_file_legacy(path) {
                     commands.spawn((
                         Mesh3d(meshes.add(mesh.clone())),
                         MeshMaterial3d(materials.add(StandardMaterial {
@@ -117,6 +118,12 @@ fn load_resource(
                     println!("Spawned mesh with vertices: {:?}", mesh.count_vertices());
                     // TODO: Check vertices correct or not
                 }
+            }
+            // XML: .vtu (非结构网格), .vtp (多边形数据), .vts (结构网格),
+            //      .vtr (矩形网格), .vti (图像数据)
+            Some("vtu" | "vtp" | "vts" | "vtr" | "vti") => {
+                // TODO
+                todo!("vtu/vtp/vts/vtr/vti format support")
             }
             _ => println!("do not support other formats now. Please choose another model."),
         };
