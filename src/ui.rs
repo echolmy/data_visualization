@@ -102,6 +102,7 @@ fn load_resource(
                             metallic: 0.0,
                             perceptual_roughness: 0.5,
                             reflectance: 0.1,
+                            cull_mode: None,
                             ..default()
                         })),
                         Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -1.0)

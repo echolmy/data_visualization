@@ -11,6 +11,9 @@ pub struct GeometryData {
     indices: Vec<u32>,
     // normals: Option<Vec<[f32; 3]>>,
 }
+
+pub struct VtkAttribute {}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum VtkError {
@@ -35,17 +38,6 @@ pub trait VtkMeshExtractor {
     }
 
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32>;
-
-    // fn extract_geometry(&self, dataset: model::DataSet) -> Result<GeometryData, VtkError> {
-    //     match dataset {
-    //         model::DataSet::UnstructuredGrid { meta: _, pieces } => self.process_legacy(pieces),
-    //         model::DataSet::PolyData { meta, pieces } => {
-    //             // self.process_legacy(pieces)
-    //             todo!()
-    //         }
-    //         _ => Err(VtkError::UnsupportedDataType),
-    //     }
-    // }
 
     fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError>;
 }
@@ -218,11 +210,30 @@ impl PolyDataExtractor {
             let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
             let vertices = data_iter.by_ref().take(num_vertices).collect::<Vec<u32>>();
 
-            // TODO
-            if num_vertices == 3 {
-                indices.extend(vertices);
-            }
+            indices.extend(self.triangulate_fan(&vertices));
         }
+        indices
+    }
+
+    fn triangulate_fan(&self, vertices: &[u32]) -> Vec<u32> {
+        // 如果顶点少于3个，无法形成三角形
+        if vertices.len() < 3 {
+            return Vec::new();
+        }
+        if vertices.len() == 3 {
+            return vertices.to_vec();
+        }
+        // 分配空间：对于n个顶点的多边形，需要(n-2)*3个索引来存储三角形
+        let mut indices = Vec::with_capacity((vertices.len() - 2) * 3);
+        // 使用第一个顶点作为扇形的中心点
+        let center_vertex = vertices[0];
+        // 创建三角形扇形
+        for i in 1..vertices.len() - 1 {
+            indices.push(center_vertex); // 中心点
+            indices.push(vertices[i]); // 当前点
+            indices.push(vertices[i + 1]); // 下一个点
+        }
+
         indices
     }
 }
