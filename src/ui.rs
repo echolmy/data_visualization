@@ -94,7 +94,7 @@ fn load_resource(
                 //     .unwrap_or_else(|_| panic!("Failed to load file: {:?}", &vtk_path));
                 // let vtk_file = vtk::load_vtk(path);
                 // match enum vtk.data
-                if let Some(mesh) = vtk::process_vtk_file_legacy(path) {
+                if let Ok(mesh) = vtk::process_vtk_file_legacy(path) {
                     commands.spawn((
                         Mesh3d(meshes.add(mesh.clone())),
                         MeshMaterial3d(materials.add(StandardMaterial {
