@@ -12,6 +12,7 @@ pub struct GeometryData {
     // normals: Option<Vec<[f32; 3]>>,
 }
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum VtkError {
     LoadError(String),
     InvalidFormat(&'static str),
@@ -33,7 +34,7 @@ pub trait VtkMeshExtractor {
         points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect()
     }
 
-    fn extract_indices(&self, cells: model::Cells) -> Vec<u32>;
+    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32>;
 
     // fn extract_geometry(&self, dataset: model::DataSet) -> Result<GeometryData, VtkError> {
     //     match dataset {
@@ -48,26 +49,30 @@ pub trait VtkMeshExtractor {
 
     fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError>;
 }
-// pub struct MeshExtractor;
+
 pub struct UnstructuredGridExtractor;
 pub struct PolyDataExtractor;
+
 impl VtkMeshExtractor for UnstructuredGridExtractor {
     type PieceType = Vec<model::Piece<model::UnstructuredGridPiece>>;
-    fn extract_indices(&self, cells: model::Cells) -> Vec<u32> {
-        self.triangulate_cells(cells)
+    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
+        if let model::Piece::Inline(piece) = pieces.into_iter().next().unwrap() {
+            self.triangulate_cells(piece.cells)
+        } else {
+            todo!()
+        }
     }
 
     fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError> {
         let piece = pieces
-            .into_iter()
-            .next()
+            .first()
             .ok_or(VtkError::MissingData("No pieces found".into()))?;
         let model::Piece::Inline(piece) = piece else {
             return Err(VtkError::InvalidFormat("Expected inline data".into()));
         };
 
         let vertices = self.extract_vertices(&piece.points);
-        let indices = self.extract_indices(piece.cells);
+        let indices = self.extract_indices(pieces);
 
         // use bevy interface to compute normals
         // let normals = compute_normals(&vertices, &indices);
@@ -126,61 +131,101 @@ impl UnstructuredGridExtractor {
     }
 }
 
-// impl VtkMeshExtractor for PolyDataExtractor {
-//     fn extract_indices(&self, cells: model::Cells) -> Vec<u32> {
-//         todo!()
-//     }
+impl VtkMeshExtractor for PolyDataExtractor {
+    type PieceType = Vec<model::Piece<model::PolyDataPiece>>;
+    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
+        self.process_polydata(pieces).unwrap()
+    }
+    fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError> {
+        let piece = pieces
+            .first()
+            .ok_or(VtkError::MissingData("No pieces found".into()))?;
+        let model::Piece::Inline(piece) = piece else {
+            return Err(VtkError::InvalidFormat("Expected inline data".into()));
+        };
 
-//     fn extract_geometry(&self, dataset: model::DataSet) -> Result<GeometryData, VtkError> {
-//         todo!()
-//     }
-// }
+        let vertices = self.extract_vertices(&piece.points);
+        let indices = self.extract_indices(pieces);
 
-// impl PolyDataExtractor {
-//     pub fn process_polydata(
-//         &self,
-//         pieces: Vec<model::Piece<model::PolyDataPiece>>,
-//     ) -> Result<GeometryData, VtkError> {
-//         let piece = pieces
-//             .into_iter()
-//             .next()
-//             .ok_or(VtkError::MissingData("No pieces found".into()))?;
-//         let model::Piece::Inline(piece) = piece else {
-//             return Err(VtkError::InvalidFormat("Expected inline data".into()));
-//         };
-//         let vertices = self.extract_vertices(&piece.points);
+        Ok(GeometryData { vertices, indices })
+    }
+}
 
-//         let mut indices = Vec::<u32>::new();
-//         // let verts = piece.verts.as_ref().ok_or()
-//         let polys = piece.polys.as_ref().ok_or(VtkError::MissingData("polys"))?;
-//         let vertices = self.extract_vertices(&piece.points);
+impl PolyDataExtractor {
+    fn process_polydata(
+        &self,
+        pieces: Vec<model::Piece<model::PolyDataPiece>>,
+    ) -> Result<Vec<u32>, VtkError> {
+        let piece = pieces
+            .into_iter()
+            .next()
+            .ok_or(VtkError::MissingData("No pieces found".into()))?;
+        let model::Piece::Inline(piece) = piece else {
+            return Err(VtkError::InvalidFormat("Expected inline data".into()));
+        };
+        // let vertices = self.extract_vertices(&piece.points);
 
-//         // 构造虚拟Cells结构
-//         // let cells = model::Cells {
-//         //     cell_verts: polys.connectivity.clone().into(),
-//         //     types: vec![CellType::Polygon; polys.num_cells() as usize],
-//         // };
+        let mut indices = Vec::<u32>::new();
 
-//         // let indices = self.triangulate_cells(cells);
+        // vertices topology
+        if let Some(_) = piece.verts {
+            println!("Found vertex primitives - skipping as they don't form surfaces");
+        }
 
-//         // Ok(GeometryData {
-//         //     vertices,
-//         //     indices,
-//         // })
-//         todo!()
-//     }
+        // lines topology
+        if let Some(_) = piece.lines {
+            println!("Found line primitives - skipping as they don't form surfaces");
+        }
+        // polygon topology
+        if let Some(polys) = piece.polys {
+            let polys_indices = self.triangulate_polygon(polys);
+            indices.extend(polys_indices);
+        }
 
-//     // Simple implementation
-//     fn triangulate_polygon(&self, verts: &[u32]) -> Vec<u32> {
-//         let mut indices = Vec::with_capacity((verts.len() - 2) * 3);
-//         for i in 1..verts.len() - 1 {
-//             indices.push(verts[0]);
-//             indices.push(verts[i]);
-//             indices.push(verts[i + 1]);
-//         }
-//         indices
-//     }
-// }
+        if let Some(strips) = piece.strips {
+            todo!(
+                "implement a function that input is triangle strips, implementing triangulate{:?}",
+                strips
+            );
+        }
+
+        if indices.is_empty() {
+            return Err(VtkError::MissingData(
+                "No surface geometry found in the piece",
+            ));
+        }
+
+        Ok(indices)
+        // Ok(GeometryData { vertices, indices })
+    }
+
+    // Simple implementation
+    fn triangulate_polygon(&self, topology: model::VertexNumbers) -> Vec<u32> {
+        let mut indices = Vec::new();
+        let poly_data = topology.into_legacy();
+
+        let num_cells = poly_data.0;
+        // create iterator
+        let mut data_iter = poly_data.1.iter().copied().peekable();
+
+        // iterate over all cells
+        for _i in 0..num_cells {
+            if data_iter.peek().is_none() {
+                panic!("Cell type list longer than available data");
+            }
+            // load the number of each cell (first number of each row of cell)
+            // one row starting with numPoints of [label] `POLYGONS`
+            let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
+            let vertices = data_iter.by_ref().take(num_vertices).collect::<Vec<u32>>();
+
+            // TODO
+            if num_vertices == 3 {
+                indices.extend(vertices);
+            }
+        }
+        indices
+    }
+}
 
 //************************************* Main Process Logic**************************************//
 pub fn process_vtk_file_legacy(path: &PathBuf) -> Result<Mesh, VtkError> {
@@ -192,16 +237,14 @@ pub fn process_vtk_file_legacy(path: &PathBuf) -> Result<Mesh, VtkError> {
             let extractor = UnstructuredGridExtractor;
             geometry = extractor.process_legacy(pieces)?;
         }
-        model::DataSet::PolyData { meta, pieces } => {
-            // self.process_legacy(pieces)
-            todo!()
+        model::DataSet::PolyData { meta: _, pieces } => {
+            let extractor = PolyDataExtractor;
+            geometry = extractor.process_legacy(pieces)?;
         }
         _ => {
             return Err(VtkError::UnsupportedDataType);
         }
     }
-    // let extractor = MeshExtractor;
-    // let geometry = extractor.extract_geometry(vtk.map(|vtk| vtk.data)?)?;
 
     Ok(create_mesh_legacy(geometry))
 }
