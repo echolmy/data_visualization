@@ -72,9 +72,11 @@ fn load_resource(
                     Mesh3d(asset_server.load(format!("{}", path.to_string_lossy()))),
                     Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -5.0),
                     MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.8, 0.7, 0.6),
-                        metallic: 0.0,
-                        perceptual_roughness: 0.5,
+                        base_color: Color::WHITE,
+                        base_color_texture: None,
+                        // perceptual_roughness: 0.5,
+                        // metallic: 0.0,
+                        unlit: false,
                         ..default()
                     })),
                 ));
