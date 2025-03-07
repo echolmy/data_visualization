@@ -62,6 +62,7 @@ fn load_resource(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut load_events: EventReader<events::LoadModelEvent>,
     window_query: Query<&Window, With<PrimaryWindow>>,
+    mut egui_context: EguiContexts,
 ) {
     let window = window_query.get_single().unwrap();
     for events::LoadModelEvent(path) in load_events.read() {
@@ -88,44 +89,54 @@ fn load_resource(
             // VTK extension:
             // Legacy: .vtk
             Some("vtk") => {
-                // let vtk_path = PathBuf::from(format!("{}", path.to_string_lossy()));
-                // let vtk_file = Vtk::import(&vtk_path)
-                //     .unwrap_or_else(|_| panic!("Failed to load file: {:?}", &vtk_path));
-                // let vtk_file = vtk::load_vtk(path);
-                // match enum vtk.data
-                if let Ok(mesh) = vtk::process_vtk_file_legacy(path) {
-                    commands.spawn((
-                        Mesh3d(meshes.add(mesh.clone())),
-                        MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: Color::srgb(0.7, 0.7, 0.7),
-                            metallic: 0.0,
-                            perceptual_roughness: 0.5,
-                            reflectance: 0.1,
-                            cull_mode: None,
-                            ..default()
-                        })),
-                        Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -1.0)
-                            .with_rotation(Quat::from_euler(
-                                EulerRot::XYZ,
-                                std::f32::consts::PI / 2.0,
-                                std::f32::consts::PI / 4.0,
-                                0.0,
-                            )),
-                        Visibility::Visible,
-                    ));
+                match vtk::process_vtk_file_legacy(path) {
+                    Ok(mesh) => {
+                        commands.spawn((
+                            Mesh3d(meshes.add(mesh.clone())),
+                            MeshMaterial3d(materials.add(StandardMaterial {
+                                base_color: Color::srgb(0.7, 0.7, 0.7),
+                                metallic: 0.0,
+                                perceptual_roughness: 0.5,
+                                reflectance: 0.1,
+                                cull_mode: None,
+                                ..default()
+                            })),
+                            Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -1.0)
+                                .with_rotation(Quat::from_euler(
+                                    EulerRot::XYZ,
+                                    std::f32::consts::PI / 2.0,
+                                    std::f32::consts::PI / 4.0,
+                                    0.0,
+                                )),
+                            Visibility::Visible,
+                        ));
 
-                    // 在spawn后添加
-                    println!("Spawned mesh with vertices: {:?}", mesh.count_vertices());
-                    // TODO: Check vertices correct or not
+                        println!("生成的网格顶点数: {:?}", mesh.count_vertices());
+                    }
+                    Err(err) => {
+                        println!("加载VTK文件失败: {:?}", err);
+                        // 显示错误消息到UI
+                        egui::Window::new("错误").show(egui_context.ctx_mut(), |ui| {
+                            ui.label(format!("加载文件失败: {:?}", err));
+                        });
+                    }
                 }
             }
             // XML: .vtu (非结构网格), .vtp (多边形数据), .vts (结构网格),
             //      .vtr (矩形网格), .vti (图像数据)
             Some("vtu" | "vtp" | "vts" | "vtr" | "vti") => {
-                // TODO
-                todo!("vtu/vtp/vts/vtr/vti format support")
+                // 显示暂不支持的消息
+                egui::Window::new("提示").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("目前暂不支持该格式，正在开发中...");
+                });
             }
-            _ => println!("do not support other formats now. Please choose another model."),
+            _ => {
+                println!("目前不支持其他格式，请选择另一个模型。");
+                // 显示不支持的消息
+                egui::Window::new("不支持的格式").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("不支持此文件格式，请选择.obj或.vtk文件。");
+                });
+            }
         };
     }
 }
