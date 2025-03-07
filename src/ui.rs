@@ -5,7 +5,6 @@ use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
-
 pub struct UIPlugin;
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
@@ -73,10 +72,8 @@ fn load_resource(
                     Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, -5.0),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
-                        base_color_texture: None,
-                        // perceptual_roughness: 0.5,
-                        // metallic: 0.0,
-                        unlit: false,
+                        unlit: true,
+                        alpha_mode: AlphaMode::Blend,
                         ..default()
                     })),
                 ));

@@ -503,10 +503,11 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
         todo!()
     }
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
-        if let model::Piece::Inline(piece) = pieces.into_iter().next().unwrap() {
+        if let Some(model::Piece::Inline(piece)) = pieces.into_iter().next() {
             self.triangulate_cells(piece.cells)
         } else {
-            todo!()
+            // 如果没有内联数据，返回空向量
+            Vec::new()
         }
     }
 
