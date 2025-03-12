@@ -1,6 +1,6 @@
 mod events;
 
-use crate::mesh::vtk;
+use crate::mesh::{self, vtk};
 use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_egui::*;
 use rfd::FileDialog;
@@ -89,7 +89,7 @@ fn load_resource(
             // VTK extension:
             // Legacy: .vtk
             Some("vtk") => {
-                match vtk::process_vtk_file_legacy(path) {
+                match mesh::process_vtk_file_legacy(path) {
                     Ok(mesh) => {
                         commands.spawn((
                             Mesh3d(meshes.add(mesh.clone())),

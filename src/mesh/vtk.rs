@@ -8,7 +8,6 @@ use super::VtkError;
 use crate::mesh::triangulation;
 use vtkio::*;
 
-
 // Definition of type of attributes
 #[derive(Debug, Clone)]
 pub enum AttributeType {
@@ -37,10 +36,9 @@ pub enum AttributeLocation {
 /// Structured Points; Structured Grid; Rectilinear Grid; Polygonal Data; Unstructured Grid; Field
 #[derive(Clone)]
 pub struct GeometryData {
-    vertices: Vec<[f32; 3]>,
-    indices: Vec<u32>,
-
-    attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
+    pub vertices: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+    pub attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
     // normals: Option<Vec<[f32; 3]>>,
 }
 impl GeometryData {
@@ -81,7 +79,7 @@ impl GeometryData {
     //         .map(|attrs| attrs.keys().cloned().collect())
     //         .unwrap_or_default()
     // }
-    
+
     /// Apply point color scalars to a mesh.
     ///
     /// This function will try to find a `ColorScalar` attribute in the `Point` location,
@@ -328,7 +326,6 @@ impl GeometryData {
         Ok(())
     }
 }
-
 
 pub trait VtkMeshExtractor {
     // associated type
@@ -642,71 +639,3 @@ impl PolyDataExtractor {
         triangulation::triangulate_polygon(topology)
     }
 }
-
-//************************************* Main Process Logic**************************************//
-// 在process_vtk_file_legacy函数中添加对更多属性的处理
-pub fn process_vtk_file_legacy(path: &PathBuf) -> Result<Mesh, VtkError> {
-    let geometry: GeometryData;
-    let vtk = Vtk::import(PathBuf::from(format!("{}", path.to_string_lossy())))
-        .map_err(|e| VtkError::LoadError(e.to_string()))?;
-
-    match vtk.data {
-        model::DataSet::UnstructuredGrid { meta: _, pieces } => {
-            let extractor = UnstructuredGridExtractor;
-            geometry = extractor.process_legacy(pieces)?;
-        }
-        model::DataSet::PolyData { meta: _, pieces } => {
-            let extractor = PolyDataExtractor;
-            geometry = extractor.process_legacy(pieces)?;
-        }
-        _ => {
-            return Err(VtkError::UnsupportedDataType);
-        }
-    }
-
-    println!("提取的几何数据属性信息: {:?}", &geometry.attributes);
-
-    // 创建带属性的网格
-    let mut mesh = create_mesh_legacy(geometry.clone());
-
-    // 应用颜色属性
-    let _ = geometry.apply_cell_color_scalars(&mut mesh);
-
-    // 如果没有单元格颜色，尝试应用点颜色
-    if mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_none() {
-        let _ = geometry.apply_point_color_scalars(&mut mesh);
-    }
-
-    // 应用其他标量属性（如果有）
-    let _ = geometry.apply_scalar_attributes(&mut mesh);
-
-    Ok(mesh)
-}
-
-pub fn create_mesh_legacy(geometry: GeometryData) -> Mesh {
-    // initialize a mesh
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-
-    // Set color
-    println!("{:?}", &geometry.attributes);
-    let _ = geometry.apply_cell_color_scalars(&mut mesh);
-
-    // process vertices position attributes
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        VertexAttributeValues::from(geometry.vertices),
-    );
-
-    // process vertices indices attributes
-    mesh.insert_indices(Indices::U32(geometry.indices));
-
-    // compute normals
-    mesh.compute_normals();
-
-    mesh
-}
-
-//**************************************************************************//
