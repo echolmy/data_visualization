@@ -4,7 +4,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::utils::HashMap;
 use std::path::PathBuf;
 
-
+use super::VtkError;
 use crate::mesh::triangulation;
 use vtkio::*;
 
@@ -32,75 +32,6 @@ pub enum AttributeLocation {
     Point,
     Cell,
 }
-
-/***********************************************************
-* Error Type Start
-***********************************************************/
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum VtkError {
-    LoadError(String),
-    InvalidFormat(&'static str),
-    UnsupportedDataType,
-    MissingData(&'static str),
-    IndexOutOfBounds {
-        index: usize,
-        max: usize,
-    },
-    DataTypeMismatch {
-        expected: &'static str,
-        found: &'static str,
-    },
-    AttributeMismatch {
-        attribute_size: usize,
-        expected_size: usize,
-    },
-    ConversionError(String),
-    IoError(std::io::Error),
-    GenericError(String),
-}
-
-impl std::fmt::Display for VtkError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VtkError::LoadError(msg) => write!(f, "加载VTK文件错误: {}", msg),
-            VtkError::InvalidFormat(detail) => write!(f, "VTK格式无效: {}", detail),
-            VtkError::UnsupportedDataType => write!(f, "不支持的数据类型"),
-            VtkError::MissingData(what) => write!(f, "缺少数据: {}", what),
-            VtkError::IndexOutOfBounds { index, max } => {
-                write!(f, "索引超出边界: {} (最大值为 {})", index, max)
-            }
-            VtkError::DataTypeMismatch { expected, found } => {
-                write!(f, "数据类型不匹配: 期望 {}, 找到 {}", expected, found)
-            }
-            VtkError::AttributeMismatch {
-                attribute_size,
-                expected_size,
-            } => {
-                write!(
-                    f,
-                    "属性大小不匹配: 属性大小 {}, 期望 {}",
-                    attribute_size, expected_size
-                )
-            }
-            VtkError::ConversionError(msg) => write!(f, "转换错误: {}", msg),
-            VtkError::IoError(err) => write!(f, "IO错误: {}", err),
-            VtkError::GenericError(msg) => write!(f, "错误: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for VtkError {}
-
-impl From<std::io::Error> for VtkError {
-    fn from(err: std::io::Error) -> Self {
-        VtkError::IoError(err)
-    }
-}
-
-/***********************************************************
-* Error Type End
-***********************************************************/
 
 /// VtkDataset:
 /// Structured Points; Structured Grid; Rectilinear Grid; Polygonal Data; Unstructured Grid; Field
@@ -150,7 +81,14 @@ impl GeometryData {
     //         .map(|attrs| attrs.keys().cloned().collect())
     //         .unwrap_or_default()
     // }
-    // 新增方法，处理点属性颜色
+    
+    /// Apply point color scalars to a mesh.
+    ///
+    /// This function will try to find a `ColorScalar` attribute in the `Point` location,
+    /// and apply it to the mesh as a vertex attribute.
+    ///
+    /// Returns `Ok(())` if the color scalars are successfully applied,
+    /// or `Err(VtkError)` if there is no such attribute or if the attribute is not a `ColorScalar`.
     pub fn apply_point_color_scalars(&self, mesh: &mut Mesh) -> Result<(), VtkError> {
         if let Some(attributes) = &self.attributes {
             let color_scalar = attributes
@@ -187,6 +125,13 @@ impl GeometryData {
         Ok(())
     }
 
+    /// Process point color scalars from attribute data.
+    ///
+    /// This function takes the number of values and the data for each point,
+    /// and returns a vector of colors.
+    ///
+    /// Returns `Ok(colors)` if the colors are successfully processed,
+    /// or `Err(VtkError)` if the data is invalid.
     fn process_point_color_scalars(
         &self,
         nvalues: u32,
@@ -225,6 +170,13 @@ impl GeometryData {
         Ok(colors)
     }
 
+    /// Apply cell color scalars to a mesh.
+    ///
+    /// This function will try to find a `ColorScalar` attribute in the `Cell` location,
+    /// and apply it to the mesh as a vertex attribute.
+    ///
+    /// Returns `Ok(())` if the color scalars are successfully applied,
+    /// or `Err(VtkError)` if there is no such attribute or if the attribute is not a `ColorScalar`.
     pub fn apply_cell_color_scalars(&self, mesh: &mut Mesh) -> Result<(), VtkError> {
         println!("Attributes status: {:?}", self.attributes.is_some());
         if let Some(attributes) = &self.attributes {
@@ -270,7 +222,13 @@ impl GeometryData {
         Ok(())
     }
 
-    // Only support file which cell topology are all triangles
+    /// Process cell color scalars from attribute data.
+    ///
+    /// This function takes the number of values and the data for each cell,
+    /// and returns a vector of colors.
+    ///
+    /// Returns `Ok(colors)` if the colors are successfully processed,
+    /// or `Err(VtkError)` if the data is invalid.
     fn process_cell_color_scalars(&self, nvalues: u32, data: &Vec<Vec<f32>>) -> Vec<[f32; 4]> {
         // initialize color list for each vertex (white)
         let mut vertices_color = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
@@ -298,7 +256,13 @@ impl GeometryData {
         vertices_color
     }
 
-    // 处理标量属性
+    /// Apply scalar attributes to a mesh.
+    ///
+    /// This function will try to find a `Scalar` attribute in the `Point` or `Cell` location,
+    /// and apply it to the mesh as a vertex attribute.
+    ///
+    /// Returns `Ok(())` if the scalar attributes are successfully applied,
+    /// or `Err(VtkError)` if there is no such attribute or if the attribute is not a `Scalar`.
     pub fn apply_scalar_attributes(&self, mesh: &mut Mesh) -> Result<(), VtkError> {
         if let Some(attributes) = &self.attributes {
             // 查找所有标量属性
