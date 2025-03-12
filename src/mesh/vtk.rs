@@ -3,7 +3,35 @@ use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::utils::HashMap;
 use std::path::PathBuf;
+
+
+use crate::mesh::triangulation;
 use vtkio::*;
+
+
+// Definition of type of attributes
+#[derive(Debug, Clone)]
+pub enum AttributeType {
+    // String: table name. If not specified, table name should be `default`
+    Scalar {
+        num_comp: usize,
+        table_name: String,
+        data: Vec<f32>,
+    },
+    ColorScalar {
+        nvalues: u32,
+        data: Vec<Vec<f32>>,
+    },
+    Vector(Vec<[f32; 3]>),
+    // Tensor
+}
+
+// Position of Attribute
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AttributeLocation {
+    Point,
+    Cell,
+}
 
 /***********************************************************
 * Error Type Start
@@ -336,29 +364,7 @@ impl GeometryData {
         Ok(())
     }
 }
-// Definition of type of attributes
-#[derive(Debug, Clone)]
-pub enum AttributeType {
-    // String: table name. If not specified, table name should be `default`
-    Scalar {
-        num_comp: usize,
-        table_name: String,
-        data: Vec<f32>,
-    },
-    ColorScalar {
-        nvalues: u32,
-        data: Vec<Vec<f32>>,
-    },
-    Vector(Vec<[f32; 3]>),
-    // Tensor
-}
 
-// Position of Attribute
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AttributeLocation {
-    Point,
-    Cell,
-}
 
 pub trait VtkMeshExtractor {
     // associated type
@@ -529,71 +535,9 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
     }
 }
 impl UnstructuredGridExtractor {
-    // general triangulate cells
+    // general triangulate cells - 使用通用三角化函数
     fn triangulate_cells(&self, cells: model::Cells) -> Vec<u32> {
-        // allocate memory according to triangle initially, if small, it will re-allocate
-        let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
-        let cell_data = cells.cell_verts.into_legacy();
-
-        // create iterator
-        // use peekable to check edge condition
-        let mut data_iter = cell_data.1.iter().copied().peekable();
-
-        for cell_type in &cells.types {
-            if data_iter.peek().is_none() {
-                panic!("Cell type list longer than available data");
-            }
-            // load the number of each cell (first number of each row of cell)
-            let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
-            // load indices of vertices of this cell
-            let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
-
-            // process data according to topology
-            match cell_type {
-                // triangle
-                model::CellType::Triangle => {
-                    if num_vertices != 3 {
-                        panic!(
-                            "Invalid triangle vertex count: {} (expected 3)",
-                            num_vertices
-                        );
-                    }
-                    // push indices of this cell to indices list
-                    indices.extend(vertices);
-                }
-
-                model::CellType::Quad => {
-                    // 将四边形分解为两个三角形
-                    if num_vertices != 4 {
-                        panic!("Invalid quad vertex count: {} (expected 4)", num_vertices);
-                    }
-                    indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
-                    indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
-                }
-
-                model::CellType::Tetra => {
-                    // 四面体分解为4个三角形
-                    panic!("Invalid tetrahedron vertex count.");
-                    indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
-                    indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
-                    indices.extend_from_slice(&[vertices[0], vertices[3], vertices[1]]);
-                    indices.extend_from_slice(&[vertices[1], vertices[3], vertices[2]]);
-                }
-
-                _ => {
-                    println!("Unsupported cell type: {:?}", cell_type);
-                    todo!()
-                }
-            }
-        }
-        // check whether data all consumed
-        if data_iter.next().is_some() {
-            panic!(
-                "{} bytes of extra data remaining after processing",
-                data_iter.count() + 1
-            );
-        }
-        indices
+        triangulation::triangulate_cells(cells)
     }
 }
 
@@ -618,51 +562,53 @@ impl VtkMeshExtractor for PolyDataExtractor {
         let point_attr_list = &piece.data.point;
         let cell_attr_list = &piece.data.cell;
 
-        // process point attributes
-        if point_attr_list.len() != 0 {
+        // 处理点属性
+        if !point_attr_list.is_empty() {
             for point_attr in point_attr_list {
                 match point_attr {
                     model::Attribute::DataArray(data_array) => {
-                        let attribute = self.process_data_array(
+                        if let Ok((name, attr_type)) = self.process_data_array(
                             &data_array.name,
                             &data_array.elem,
                             &data_array.data,
-                        );
-                        println!("{:?}", attribute);
-                        todo!()
+                        ) {
+                            attributes.insert((name, AttributeLocation::Point), attr_type);
+                        }
                     }
-                    model::Attribute::Field { name, data_array } => {
-                        todo!("to be continued: {:?} and {:?}", name, data_array)
+                    model::Attribute::Field {
+                        name: _,
+                        data_array: _,
+                    } => {
+                        println!("警告: Field属性暂不支持");
                     }
                 }
             }
         }
 
-        // process cell attributes
-        if cell_attr_list.len() != 0 {
+        // 处理单元格属性
+        if !cell_attr_list.is_empty() {
             for cell_attr in cell_attr_list {
                 match cell_attr {
                     model::Attribute::DataArray(data_array) => {
-                        let name = &data_array.name;
-                        let elem = &data_array.elem;
-                        let data = &data_array.data;
-                        let attribute = self.process_data_array(name, elem, data);
-
-                        // let _ = attribute.map(|(name, attr_type)| {
-                        //     attributes.insert((name, AttributeLocation::Cell), attr_type);
-                        // });
-                        attributes.insert(
-                            (data_array.name.clone(), AttributeLocation::Cell),
-                            attribute?.1,
-                        );
-                        println!("{:?}", attributes);
+                        if let Ok((name, attr_type)) = self.process_data_array(
+                            &data_array.name,
+                            &data_array.elem,
+                            &data_array.data,
+                        ) {
+                            attributes.insert((name, AttributeLocation::Cell), attr_type);
+                        }
                     }
-                    model::Attribute::Field { name, data_array } => {
-                        todo!("to be continued: {:?} and {:?}", name, data_array)
+                    model::Attribute::Field {
+                        name: _,
+                        data_array: _,
+                    } => {
+                        // todo!("Field属性暂不支持")
+                        println!("警告: Field属性暂不支持");
                     }
                 }
             }
         }
+
         Ok(attributes)
     }
     fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError> {
@@ -683,6 +629,7 @@ impl VtkMeshExtractor for PolyDataExtractor {
 }
 
 impl PolyDataExtractor {
+    // 改进的多边形数据处理方法
     fn process_polydata(
         &self,
         pieces: Vec<model::Piece<model::PolyDataPiece>>,
@@ -690,132 +637,45 @@ impl PolyDataExtractor {
         let piece = pieces
             .into_iter()
             .next()
-            .ok_or(VtkError::MissingData("No pieces found"))?;
+            .ok_or(VtkError::MissingData("未找到片段"))?;
         let model::Piece::Inline(piece) = piece else {
-            return Err(VtkError::InvalidFormat("Expected inline data"));
+            return Err(VtkError::InvalidFormat("需要内联数据"));
         };
-        // let vertices = self.extract_vertices(&piece.points);
 
         let mut indices = Vec::<u32>::new();
 
-        // vertices topology
+        // 处理顶点拓扑（跳过，因为它们不形成表面）
         if let Some(_) = piece.verts {
-            println!("Found vertex primitives - skipping as they don't form surfaces");
+            println!("发现顶点图元 - 跳过，因为它们不形成表面");
         }
 
-        // lines topology
+        // 处理线拓扑（跳过，因为它们不形成表面）
         if let Some(_) = piece.lines {
-            println!("Found line primitives - skipping as they don't form surfaces");
+            println!("发现线图元 - 跳过，因为它们不形成表面");
         }
-        // polygon topology
+
+        // 处理多边形拓扑 - 主要处理逻辑
         if let Some(polys) = piece.polys {
             let polys_indices = self.triangulate_polygon(polys);
             indices.extend(polys_indices);
         }
 
-        if let Some(strips) = piece.strips {
-            todo!(
-                "implement a function that input is triangle strips, implementing triangulate{:?}",
-                strips
-            );
+        // 处理三角形条带（暂不实现）
+        if let Some(_strips) = piece.strips {
+            println!("发现三角形条带 - 暂不支持");
+            // todo!()
         }
 
         if indices.is_empty() {
-            return Err(VtkError::MissingData(
-                "No surface geometry found in the piece",
-            ));
+            return Err(VtkError::MissingData("片段中未找到表面几何"));
         }
 
         Ok(indices)
-        // Ok(GeometryData { vertices, indices })
     }
 
     fn triangulate_polygon(&self, topology: model::VertexNumbers) -> Vec<u32> {
-        let mut indices = Vec::new();
-        let poly_data = topology.into_legacy();
-
-        let num_cells = poly_data.0;
-        // create iterator
-        let mut data_iter = poly_data.1.iter().copied().peekable();
-
-        // iterate over all cells
-        for _i in 0..num_cells {
-            if data_iter.peek().is_none() {
-                // use Result instead of panic
-                println!("Warning: incomplete data structure, may cause rendering errors");
-                break;
-            }
-
-            // load the number of vertices of each cell (first number of each row of cell)
-            let num_vertices = match data_iter.next() {
-                Some(n) => n as usize,
-                None => {
-                    println!("Warning: missing vertex count information");
-                    break;
-                }
-            };
-
-            // collect vertices
-            let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
-
-            if vertices.len() < 3 {
-                // if less than 3 vertices, cannot form a triangle
-                continue;
-            }
-
-            // choose triangulation strategy based on number of vertices
-            match vertices.len() {
-                3 => {
-                    // already a triangle, add directly
-                    indices.extend_from_slice(&vertices);
-                }
-                4 => {
-                    // quadrilateral can be divided into two triangles
-                    indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
-                    indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
-                }
-                _ => {
-                    // 一般多边形使用耳切法（ear clipping）或扇形三角化
-                    indices.extend(self.triangulate_complex_polygon(&vertices));
-                }
-            }
-        }
-
-        // check if there is still remaining data (this is a warning, not an error)
-        if data_iter.next().is_some() {
-            println!("Warning: processed data still has additional data remaining, may not be fully parsed");
-        }
-
-        indices
-    }
-
-    // 改进的多边形三角化算法，使用改进的扇形三角化
-    // 尝试找到一个适合作为扇形中心的顶点
-    fn triangulate_complex_polygon(&self, vertices: &[u32]) -> Vec<u32> {
-        if vertices.len() < 3 {
-            return Vec::new();
-        }
-
-        // 如果是三角形，直接返回
-        if vertices.len() == 3 {
-            return vertices.to_vec();
-        }
-
-        // 分配空间：对于n个顶点的多边形，需要(n-2)*3个索引
-        let mut indices = Vec::with_capacity((vertices.len() - 2) * 3);
-
-        // 对于简单情况，使用首个顶点作为中心点
-        // 注意：这种方法对于凹多边形可能会产生错误，但对于大多数VTK文件中的凸多边形应该足够
-        let center_vertex = vertices[0];
-
-        // 创建三角形扇形 - 顺时针方向
-        for i in 1..vertices.len() - 1 {
-            indices.push(center_vertex); // 中心点
-            indices.push(vertices[i]); // 当前点
-            indices.push(vertices[i + 1]); // 下一个点
-        }
-
-        indices
+        // 使用通用三角化模块中的函数
+        triangulation::triangulate_polygon(topology)
     }
 }
 
