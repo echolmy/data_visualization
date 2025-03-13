@@ -3,12 +3,12 @@ use vtkio::model;
 /// 通用三角化模块，提供各种几何体的三角化功能
 
 /// 扇形三角化算法
-/// 
+///
 /// 将一个多边形顶点列表分解为三角形，使用第一个顶点作为扇形中心
-/// 
+///
 /// # 参数
 /// * `vertices` - 多边形顶点索引列表
-/// 
+///
 /// # 返回值
 /// * 三角形索引列表（每三个为一组）
 pub fn triangulate_fan(vertices: &[u32]) -> Vec<u32> {
@@ -31,7 +31,7 @@ pub fn triangulate_fan(vertices: &[u32]) -> Vec<u32> {
     // 创建三角形扇形
     for i in 1..vertices.len() - 1 {
         indices.push(center_vertex); // 中心点
-        indices.push(vertices[i]);   // 当前点
+        indices.push(vertices[i]); // 当前点
         indices.push(vertices[i + 1]); // 下一个点
     }
 
@@ -39,16 +39,17 @@ pub fn triangulate_fan(vertices: &[u32]) -> Vec<u32> {
 }
 
 /// 多边形三角化函数
-/// 
+///
 /// 将一个多边形（可能是复杂形状）转换为三角形列表
-/// 
+///
 /// # 参数
 /// * `topology` - 顶点拓扑结构
-/// 
+///
 /// # 返回值
-/// * 三角形索引列表
-pub fn triangulate_polygon(topology: model::VertexNumbers) -> Vec<u32> {
+/// * (三角形索引列表, 三角形到原始单元格的映射)
+pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usize>) {
     let mut indices = Vec::new();
+    let mut triangle_to_cell_mapping = Vec::new();
     let poly_data = topology.into_legacy();
 
     let num_cells = poly_data.0;
@@ -56,7 +57,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> Vec<u32> {
     let mut data_iter = poly_data.1.iter().copied().peekable();
 
     // 遍历所有单元格
-    for _i in 0..num_cells {
+    for cell_idx in 0..num_cells {
         if data_iter.peek().is_none() {
             println!("警告: 数据迭代器为空，可能未完全解析");
             break;
@@ -88,20 +89,47 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> Vec<u32> {
             continue;
         }
 
+        // 记录当前索引列表的长度，用于计算这个单元格生成了多少个三角形
+        let initial_index_count = indices.len();
+
         // 根据顶点数量选择合适的三角化方法
         match vertices.len() {
             3 => {
                 // 已经是三角形，直接添加
                 indices.extend_from_slice(&vertices);
+                // 一个三角形一个映射
+                triangle_to_cell_mapping.push(cell_idx as usize);
             }
             4 => {
                 // 四边形分解为两个三角形
                 indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
                 indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
+                // 两个三角形两个映射
+                triangle_to_cell_mapping.push(cell_idx as usize);
+                triangle_to_cell_mapping.push(cell_idx as usize);
             }
             _ => {
                 // 多于4个顶点的多边形，使用扇形三角化
-                indices.extend(triangulate_fan(&vertices));
+                let fan_indices = triangulate_fan(&vertices);
+                indices.extend(fan_indices);
+                // 多个三角形多个映射
+                for _ in 0..(vertices.len() - 2) {
+                    triangle_to_cell_mapping.push(cell_idx as usize);
+                }
+            }
+        }
+
+        // 验证是否正确添加了映射
+        let triangles_added = (indices.len() - initial_index_count) / 3;
+        let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
+        if triangles_added != mappings_added {
+            println!(
+                "警告: 三角形数量({})与映射数量({})不匹配",
+                triangles_added, mappings_added
+            );
+            // 补齐映射
+            while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
+                triangle_to_cell_mapping.push(cell_idx as usize);
             }
         }
     }
@@ -111,26 +139,27 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> Vec<u32> {
         println!("警告: 处理后仍有额外数据剩余，可能未完全解析");
     }
 
-    indices
+    (indices, triangle_to_cell_mapping)
 }
 
 /// 三角化不同类型的单元格
-/// 
+///
 /// # 参数
 /// * `cells` - 单元格数据
-/// 
+///
 /// # 返回值
-/// * 三角形索引列表
-pub fn triangulate_cells(cells: model::Cells) -> Vec<u32> {
+/// * (三角形索引列表, 三角形到原始单元格的映射)
+pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
     // allocate memory according to triangle initially, if small, it will re-allocate
     let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
+    let mut triangle_to_cell_mapping = Vec::new();
     let cell_data = cells.cell_verts.into_legacy();
 
     // create iterator
     // use peekable to check edge condition
     let mut data_iter = cell_data.1.iter().copied().peekable();
 
-    for cell_type in &cells.types {
+    for (cell_idx, cell_type) in cells.types.iter().enumerate() {
         if data_iter.peek().is_none() {
             panic!("Cell type list longer than available data");
         }
@@ -138,6 +167,9 @@ pub fn triangulate_cells(cells: model::Cells) -> Vec<u32> {
         let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
         // load indices of vertices of this cell
         let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
+
+        // 记录当前索引列表的长度，用于计算这个单元格生成了多少个三角形
+        let initial_index_count = indices.len();
 
         // process data according to topology
         match cell_type {
@@ -151,6 +183,8 @@ pub fn triangulate_cells(cells: model::Cells) -> Vec<u32> {
                 }
                 // push indices of this cell to indices list
                 indices.extend(vertices);
+                // 一个三角形一个映射
+                triangle_to_cell_mapping.push(cell_idx as usize);
             }
 
             model::CellType::Quad => {
@@ -160,17 +194,27 @@ pub fn triangulate_cells(cells: model::Cells) -> Vec<u32> {
                 }
                 indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
                 indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
+                // 两个三角形两个映射
+                triangle_to_cell_mapping.push(cell_idx as usize);
+                triangle_to_cell_mapping.push(cell_idx as usize);
             }
 
             model::CellType::Tetra => {
                 // 四面体分解为4个三角形
                 if num_vertices != 4 {
-                    panic!("Invalid tetrahedron vertex count: {} (expected 4)", num_vertices);
+                    panic!(
+                        "Invalid tetrahedron vertex count: {} (expected 4)",
+                        num_vertices
+                    );
                 }
                 indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
                 indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
                 indices.extend_from_slice(&[vertices[0], vertices[3], vertices[1]]);
                 indices.extend_from_slice(&[vertices[1], vertices[3], vertices[2]]);
+                // 四个三角形四个映射
+                for _ in 0..4 {
+                    triangle_to_cell_mapping.push(cell_idx as usize);
+                }
             }
 
             _ => {
@@ -179,12 +223,31 @@ pub fn triangulate_cells(cells: model::Cells) -> Vec<u32> {
                 // 这里我们添加了通用处理，适用于简单凸多边形
                 if num_vertices >= 3 {
                     // 使用扇形三角化算法处理简单凸多边形
-                    indices.extend(triangulate_fan(&vertices));
+                    let fan_indices = triangulate_fan(&vertices);
+                    indices.extend(fan_indices);
+                    // 多个三角形多个映射
+                    for _ in 0..(vertices.len() - 2) {
+                        triangle_to_cell_mapping.push(cell_idx as usize);
+                    }
                 }
             }
         }
+
+        // 验证是否正确添加了映射
+        let triangles_added = (indices.len() - initial_index_count) / 3;
+        let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
+        if triangles_added != mappings_added {
+            println!(
+                "警告: 三角形数量({})与映射数量({})不匹配",
+                triangles_added, mappings_added
+            );
+            // 补齐映射
+            while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
+                triangle_to_cell_mapping.push(cell_idx as usize);
+            }
+        }
     }
-    
+
     // check whether data all consumed
     if data_iter.next().is_some() {
         panic!(
@@ -192,7 +255,6 @@ pub fn triangulate_cells(cells: model::Cells) -> Vec<u32> {
             data_iter.count() + 1
         );
     }
-    
-    indices
-}
 
+    (indices, triangle_to_cell_mapping)
+}
