@@ -2,8 +2,7 @@ use bevy::input::{
     mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
     ButtonInput,
 };
-use bevy::{prelude::*, window::PrimaryWindow};
-use bevy_atmosphere::prelude::*;
+use bevy::prelude::*;
 
 const MOVEMENT_SPEED: f32 = 5.0;
 const ZOOM_SPEED: f32 = 20.0;
@@ -42,24 +41,23 @@ impl Default for CameraRotationController {
 pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(AtmospherePlugin)
-            .add_systems(Startup, spawn_camera)
+        app.add_systems(Startup, spawn_camera)
             .add_systems(Update, camera_controller);
     }
 }
 
-fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
-    let window = window_query.get_single().unwrap();
+fn spawn_camera(mut commands: Commands) {
+    // Starting position slightly elevated and back from the origin
+    let camera_position = Vec3::new(10.0, 10.0, 10.0);
+
+    // Look at the origin
+    let look_target = Vec3::ZERO;
+
     commands.spawn((
         WorldModelCamera,
-        AtmosphereCamera::default(),
         CameraRotationController::default(),
         Camera3d::default(),
-        Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 0.0),
-        Projection::from(PerspectiveProjection {
-            fov: 90.0_f32.to_radians(),
-            ..default()
-        }),
+        Transform::from_translation(camera_position).looking_at(look_target, Vec3::Y),
     ));
 }
 

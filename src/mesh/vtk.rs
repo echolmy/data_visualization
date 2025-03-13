@@ -403,7 +403,23 @@ impl GeometryData {
                                     0
                                 };
 
-                                vertex_colors[i] = color_lookup[color_index];
+                                // 获取颜色并确保所有值都在有效范围内
+                                let mut color = color_lookup[color_index];
+                                // 确保RGB值在[0.0, 1.0]范围内
+                                for j in 0..3 {
+                                    color[j] = color[j].clamp(0.0, 1.0);
+                                }
+                                // 确保alpha值为1.0（完全不透明）
+                                color[3] = 1.0;
+
+                                // 打印调试信息
+                                if i < 10 {
+                                    // 只打印前10个顶点的信息，避免输出过多
+                                    println!("顶点 {}: 标量值 = {}, 归一化值 = {:.3}, 颜色索引 = {}, 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                        i, val, normalized, color_index, color[0], color[1], color[2], color[3]);
+                                }
+
+                                vertex_colors[i] = color;
                             }
                         }
 
@@ -506,6 +522,13 @@ impl GeometryData {
                                     if idx < vertex_colors.len() {
                                         vertex_colors[idx] = color;
                                     }
+                                }
+
+                                // 打印调试信息
+                                if triangle_idx < 10 {
+                                    // 只打印前10个三角形的信息
+                                    println!("三角形 {}, 单元格 {}: 标量值 = {}, 归一化值 = {:.3}, 颜色索引 = {}, 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                        triangle_idx, cell_idx, val, normalized, color_index, color[0], color[1], color[2], color[3]);
                                 }
                             }
                         }
