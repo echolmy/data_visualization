@@ -152,8 +152,8 @@ fn load_resource(
                                 perceptual_roughness: 0.5,
                                 reflectance: 0.0,
                                 cull_mode: None,
-                                unlit: true, // 设置为false，启用光照
-                                alpha_mode: AlphaMode::Blend,
+                                unlit: true,
+                                alpha_mode: AlphaMode::Opaque,
                                 ..default()
                             })),
                             Transform::from_translation(position),
