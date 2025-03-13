@@ -1,6 +1,5 @@
 mod events;
-
-use crate::mesh::{self, vtk};
+use crate::mesh;
 use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_egui::*;
 use rfd::FileDialog;
