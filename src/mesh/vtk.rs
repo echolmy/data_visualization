@@ -3,6 +3,7 @@ use bevy::render::mesh::VertexAttributeValues;
 use bevy::utils::HashMap;
 
 use super::VtkError;
+use crate::mesh::color_maps;
 use crate::mesh::triangulation;
 use vtkio::*;
 
@@ -38,6 +39,7 @@ pub struct GeometryData {
     pub indices: Vec<u32>,
     pub attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
     // normals: Option<Vec<[f32; 3]>>,
+    pub triangle_to_cell_mapping: Option<Vec<usize>>,
 }
 impl GeometryData {
     pub fn new(
@@ -49,6 +51,7 @@ impl GeometryData {
             vertices,
             indices,
             attributes: Some(attributes),
+            triangle_to_cell_mapping: None,
         }
     }
 
@@ -58,6 +61,12 @@ impl GeometryData {
         attributes: HashMap<(String, AttributeLocation), AttributeType>,
     ) -> Self {
         self.attributes = Some(attributes);
+        self
+    }
+
+    // add triangle to cell mapping
+    pub fn add_triangle_to_cell_mapping(mut self, mapping: Vec<usize>) -> Self {
+        self.triangle_to_cell_mapping = Some(mapping);
         self
     }
 
@@ -229,26 +238,88 @@ impl GeometryData {
         // initialize color list for each vertex (white)
         let mut vertices_color = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
-        for (triangle_idx, colors) in data.iter().enumerate() {
-            // 获取这个三角形的三个顶点索引
-            let vertex_indices = [
-                self.indices[triangle_idx * 3] as usize,
-                self.indices[triangle_idx * 3 + 1] as usize,
-                self.indices[triangle_idx * 3 + 2] as usize,
-            ];
+        // 使用映射关系来确保正确映射
+        if let Some(mapping) = &self.triangle_to_cell_mapping {
+            for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
+                // 检查cell_idx是否有效
+                if cell_idx >= data.len() {
+                    println!(
+                        "警告: 单元格索引 {} 超出颜色数据范围 {}",
+                        cell_idx,
+                        data.len()
+                    );
+                    continue;
+                }
 
-            // 获取这个cell的颜色
-            let color = match nvalues {
-                3 => [colors[0], colors[1], colors[2], 1.0],
-                4 => [colors[0], colors[1], colors[2], colors[3]],
-                _ => [1.0, 1.0, 1.0, 1.0], // default color white
-            };
+                // 获取这个三角形的三个顶点索引
+                let triangle_base = triangle_idx * 3;
+                if triangle_base + 2 >= self.indices.len() {
+                    println!(
+                        "警告: 三角形索引 {} 超出索引范围 {}",
+                        triangle_base,
+                        self.indices.len()
+                    );
+                    continue;
+                }
 
-            // 设置顶点颜色
-            for idx in vertex_indices {
-                vertices_color[idx] = color;
+                let vertex_indices = [
+                    self.indices[triangle_base] as usize,
+                    self.indices[triangle_base + 1] as usize,
+                    self.indices[triangle_base + 2] as usize,
+                ];
+
+                // 获取对应单元格的颜色
+                let colors = &data[cell_idx];
+                let color = match nvalues {
+                    3 => [colors[0], colors[1], colors[2], 1.0],
+                    4 => [colors[0], colors[1], colors[2], colors[3]],
+                    _ => [1.0, 1.0, 1.0, 1.0], // default color white
+                };
+
+                // 设置顶点颜色
+                for &idx in &vertex_indices {
+                    if idx < vertices_color.len() {
+                        vertices_color[idx] = color;
+                    }
+                }
+            }
+        } else {
+            // 回退到原始方法，按顺序一一对应 (旧代码保留为后备)
+            let num_triangles = self.indices.len() / 3;
+            for triangle_idx in 0..num_triangles {
+                if triangle_idx >= data.len() {
+                    println!(
+                        "警告: 三角形索引 {} 超出颜色数据范围 {}",
+                        triangle_idx,
+                        data.len()
+                    );
+                    break;
+                }
+
+                // 获取这个三角形的三个顶点索引
+                let vertex_indices = [
+                    self.indices[triangle_idx * 3] as usize,
+                    self.indices[triangle_idx * 3 + 1] as usize,
+                    self.indices[triangle_idx * 3 + 2] as usize,
+                ];
+
+                // 获取这个cell的颜色
+                let colors = &data[triangle_idx];
+                let color = match nvalues {
+                    3 => [colors[0], colors[1], colors[2], 1.0],
+                    4 => [colors[0], colors[1], colors[2], colors[3]],
+                    _ => [1.0, 1.0, 1.0, 1.0], // default color white
+                };
+
+                // 设置顶点颜色
+                for &idx in &vertex_indices {
+                    if idx < vertices_color.len() {
+                        vertices_color[idx] = color;
+                    }
+                }
             }
         }
+
         vertices_color
     }
 
@@ -261,8 +332,7 @@ impl GeometryData {
     /// or `Err(VtkError)` if there is no such attribute or if the attribute is not a `Scalar`.
     pub fn apply_scalar_attributes(&self, mesh: &mut Mesh) -> Result<(), VtkError> {
         if let Some(attributes) = &self.attributes {
-            // 查找所有标量属性
-            for ((name, location), attr) in attributes {
+            for ((name, location), attr) in attributes.iter() {
                 if let AttributeType::Scalar {
                     num_comp,
                     table_name,
@@ -270,51 +340,174 @@ impl GeometryData {
                 } = attr
                 {
                     println!(
-                        "处理标量属性: {}, 位置: {:?}, 组件数: {}",
-                        name, location, num_comp
+                        "处理标量属性: {} 位置: {:?} 组件数: {} 查找表: {}",
+                        name, location, num_comp, table_name
                     );
 
                     match location {
                         AttributeLocation::Point => {
-                            // 点属性，直接插入
+                            // 点属性处理
                             if *num_comp == 1 {
                                 // 对于单一标量，可以考虑转换为颜色
-                                let mut colors = Vec::with_capacity(self.vertices.len());
+                                let mut vertex_colors =
+                                    vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
                                 // 计算最小最大值以进行归一化
                                 let min_val = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
                                 let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
                                 let range = max_val - min_val;
 
-                                for &val in data.iter() {
-                                    let normalized = if range > 0.0 {
-                                        (val - min_val) / range
-                                    } else {
-                                        0.5 // 防止除以0
-                                    };
+                                println!(
+                                    "标量数据范围: min={}, max={}, range={}",
+                                    min_val, max_val, range
+                                );
 
-                                    // 使用一个简单的梯度从蓝色到红色
-                                    let r = normalized;
-                                    let g = 0.2;
-                                    let b = 1.0 - normalized;
+                                // 获取颜色映射表
+                                let color_map = color_maps::get_color_map(table_name);
+                                println!(
+                                    "使用颜色映射表: {} (颜色数量: {})",
+                                    color_map.name,
+                                    color_map.colors.len()
+                                );
 
-                                    colors.push([r, g, b, 1.0]);
+                                // 为每个顶点设置颜色
+                                for (i, &val) in data.iter().enumerate() {
+                                    if i < self.vertices.len() {
+                                        let normalized = if range > 0.0 {
+                                            (val - min_val) / range
+                                        } else {
+                                            0.5 // 防止除以0
+                                        };
+                                        println!(
+                                            "顶点 {}: 原始值={}, 归一化值={}",
+                                            i, val, normalized
+                                        );
+                                        vertex_colors[i] = color_map.get_color(normalized);
+                                        println!("    颜色: {:?}", vertex_colors[i]);
+                                    }
                                 }
 
-                                if colors.len() == self.vertices.len() {
-                                    mesh.insert_attribute(
-                                        Mesh::ATTRIBUTE_COLOR,
-                                        VertexAttributeValues::from(colors),
-                                    );
-                                    println!("标量已转换为颜色并插入网格");
-                                }
+                                // 插入颜色属性
+                                mesh.insert_attribute(
+                                    Mesh::ATTRIBUTE_COLOR,
+                                    VertexAttributeValues::from(vertex_colors),
+                                );
+                                println!("点标量颜色已插入网格");
                             }
                             // 对于其他组件数，可能需要其他处理方式
                         }
                         AttributeLocation::Cell => {
-                            // 单元格属性，需要将每个单元格的值分配给其顶点
-                            // 这里可以实现类似process_cell_color_scalars的逻辑
-                            println!("单元格标量属性处理待实现");
+                            // 单元格属性处理
+                            if *num_comp == 1 {
+                                // 对于单一标量，转换为颜色
+                                let mut vertex_colors =
+                                    vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
+
+                                // 计算最小最大值以进行归一化
+                                let min_val = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+                                let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                                let range = max_val - min_val;
+
+                                // 获取颜色映射表
+                                let color_map = color_maps::get_color_map(table_name);
+                                println!("使用颜色映射表: {}", color_map.name);
+
+                                // 使用映射关系
+                                if let Some(mapping) = &self.triangle_to_cell_mapping {
+                                    for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
+                                        // 检查cell_idx是否有效
+                                        if cell_idx >= data.len() {
+                                            println!(
+                                                "警告: 单元格索引 {} 超出标量数据范围 {}",
+                                                cell_idx,
+                                                data.len()
+                                            );
+                                            continue;
+                                        }
+
+                                        // 获取单元格的标量值并归一化
+                                        let val = data[cell_idx];
+                                        let normalized = if range > 0.0 {
+                                            (val - min_val) / range
+                                        } else {
+                                            0.5 // 防止除以0
+                                        };
+
+                                        // 使用颜色映射表获取颜色
+                                        let color = color_map.get_color(normalized);
+
+                                        // 获取这个三角形的三个顶点索引
+                                        let triangle_base = triangle_idx * 3;
+                                        if triangle_base + 2 >= self.indices.len() {
+                                            println!(
+                                                "警告: 三角形索引 {} 超出索引范围 {}",
+                                                triangle_base,
+                                                self.indices.len()
+                                            );
+                                            continue;
+                                        }
+
+                                        let vertex_indices = [
+                                            self.indices[triangle_base] as usize,
+                                            self.indices[triangle_base + 1] as usize,
+                                            self.indices[triangle_base + 2] as usize,
+                                        ];
+
+                                        // 设置顶点颜色
+                                        for &idx in &vertex_indices {
+                                            if idx < vertex_colors.len() {
+                                                vertex_colors[idx] = color;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // 回退到原始方法，按顺序一一对应
+                                    let num_triangles = self.indices.len() / 3;
+                                    for triangle_idx in 0..num_triangles {
+                                        if triangle_idx >= data.len() {
+                                            println!(
+                                                "警告: 三角形索引 {} 超出标量数据范围 {}",
+                                                triangle_idx,
+                                                data.len()
+                                            );
+                                            break;
+                                        }
+
+                                        // 获取单元格的标量值并归一化
+                                        let val = data[triangle_idx];
+                                        let normalized = if range > 0.0 {
+                                            (val - min_val) / range
+                                        } else {
+                                            0.5 // 防止除以0
+                                        };
+
+                                        // 使用颜色映射表获取颜色
+                                        let color = color_map.get_color(normalized);
+
+                                        // 获取这个三角形的三个顶点索引
+                                        let vertex_indices = [
+                                            self.indices[triangle_idx * 3] as usize,
+                                            self.indices[triangle_idx * 3 + 1] as usize,
+                                            self.indices[triangle_idx * 3 + 2] as usize,
+                                        ];
+
+                                        // 设置顶点颜色
+                                        for &idx in &vertex_indices {
+                                            if idx < vertex_colors.len() {
+                                                vertex_colors[idx] = color;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 插入颜色属性
+                                mesh.insert_attribute(
+                                    Mesh::ATTRIBUTE_COLOR,
+                                    VertexAttributeValues::from(vertex_colors),
+                                );
+                                println!("单元格标量颜色已插入网格");
+                            }
+                            // 对于其他组件数，可能需要其他处理方式
                         }
                     }
                 }
@@ -469,7 +662,8 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
     }
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
         if let Some(model::Piece::Inline(piece)) = pieces.into_iter().next() {
-            self.triangulate_cells(piece.cells)
+            let (indices, _) = self.triangulate_cells(piece.cells);
+            indices
         } else {
             // 如果没有内联数据，返回空向量
             Vec::new()
@@ -485,17 +679,26 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
         };
 
         let vertices = self.extract_vertices(&piece.points);
-        let indices = self.extract_indices(pieces);
+
+        // 获取索引和映射表
+        let (indices, triangle_to_cell_mapping) =
+            if let Some(model::Piece::Inline(p)) = pieces.into_iter().next() {
+                self.triangulate_cells(p.cells)
+            } else {
+                (Vec::new(), Vec::new())
+            };
 
         // use bevy interface to compute normals
         // let normals = compute_normals(&vertices, &indices);
         let tmp: HashMap<(String, AttributeLocation), AttributeType> = HashMap::new();
-        Ok(GeometryData::new(vertices, indices, tmp))
+        let mut geometry = GeometryData::new(vertices, indices, tmp);
+        geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
+        Ok(geometry)
     }
 }
 impl UnstructuredGridExtractor {
     // general triangulate cells - 使用通用三角化函数
-    fn triangulate_cells(&self, cells: model::Cells) -> Vec<u32> {
+    fn triangulate_cells(&self, cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
         triangulation::triangulate_cells(cells)
     }
 }
@@ -503,7 +706,11 @@ impl UnstructuredGridExtractor {
 impl VtkMeshExtractor for PolyDataExtractor {
     type PieceType = Vec<model::Piece<model::PolyDataPiece>>;
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
-        self.process_polydata(pieces).unwrap()
+        if let Ok((indices, _)) = self.process_polydata(pieces) {
+            indices
+        } else {
+            Vec::new()
+        }
     }
     fn extract_attributes_legacy(
         &self,
@@ -581,9 +788,13 @@ impl VtkMeshExtractor for PolyDataExtractor {
         let attributes = self.extract_attributes_legacy(&pieces);
 
         let vertices = self.extract_vertices(&piece.points);
-        let indices = self.extract_indices(pieces);
 
-        Ok(GeometryData::new(vertices, indices, attributes?))
+        // 获取索引和映射表
+        let (indices, triangle_to_cell_mapping) = self.process_polydata(pieces.clone())?;
+
+        let mut geometry = GeometryData::new(vertices, indices, attributes?);
+        geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
+        Ok(geometry)
     }
 }
 
@@ -592,7 +803,7 @@ impl PolyDataExtractor {
     fn process_polydata(
         &self,
         pieces: Vec<model::Piece<model::PolyDataPiece>>,
-    ) -> Result<Vec<u32>, VtkError> {
+    ) -> Result<(Vec<u32>, Vec<usize>), VtkError> {
         let piece = pieces
             .into_iter()
             .next()
@@ -602,6 +813,7 @@ impl PolyDataExtractor {
         };
 
         let mut indices = Vec::<u32>::new();
+        let mut triangle_to_cell_mapping = Vec::<usize>::new();
 
         // 处理顶点拓扑（跳过，因为它们不形成表面）
         if let Some(_) = piece.verts {
@@ -615,8 +827,9 @@ impl PolyDataExtractor {
 
         // 处理多边形拓扑 - 主要处理逻辑
         if let Some(polys) = piece.polys {
-            let polys_indices = self.triangulate_polygon(polys);
+            let (polys_indices, polys_mapping) = self.triangulate_polygon(polys);
             indices.extend(polys_indices);
+            triangle_to_cell_mapping.extend(polys_mapping);
         }
 
         // 处理三角形条带（暂不实现）
@@ -629,10 +842,10 @@ impl PolyDataExtractor {
             return Err(VtkError::MissingData("片段中未找到表面几何"));
         }
 
-        Ok(indices)
+        Ok((indices, triangle_to_cell_mapping))
     }
 
-    fn triangulate_polygon(&self, topology: model::VertexNumbers) -> Vec<u32> {
+    fn triangulate_polygon(&self, topology: model::VertexNumbers) -> (Vec<u32>, Vec<usize>) {
         // 使用通用三角化模块中的函数
         triangulation::triangulate_polygon(topology)
     }
