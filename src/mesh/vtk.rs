@@ -15,6 +15,7 @@ pub enum AttributeType {
         num_comp: usize,
         table_name: String,
         data: Vec<f32>,
+        lookup_table: Option<Vec<[f32; 4]>>,
     },
     ColorScalar {
         nvalues: u32,
@@ -38,9 +39,15 @@ pub struct GeometryData {
     pub vertices: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
     pub attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
+    pub lookup_tables: HashMap<String, Vec<[f32; 4]>>,
     // normals: Option<Vec<[f32; 3]>>,
     pub triangle_to_cell_mapping: Option<Vec<usize>>,
 }
+
+// 提前定义结构体
+pub struct UnstructuredGridExtractor;
+pub struct PolyDataExtractor;
+
 impl GeometryData {
     pub fn new(
         vertices: Vec<[f32; 3]>,
@@ -51,6 +58,7 @@ impl GeometryData {
             vertices,
             indices,
             attributes: Some(attributes),
+            lookup_tables: HashMap::new(),
             triangle_to_cell_mapping: None,
         }
     }
@@ -77,6 +85,11 @@ impl GeometryData {
         location: AttributeLocation,
     ) -> Option<&AttributeType> {
         self.attributes.as_ref()?.get(&(name.to_string(), location))
+    }
+
+    // add lookup table
+    pub fn add_lookup_table(&mut self, name: String, colors: Vec<[f32; 4]>) {
+        self.lookup_tables.insert(name, colors);
     }
 
     /// Apply point color scalars to a mesh.
@@ -335,6 +348,7 @@ impl GeometryData {
                     num_comp,
                     table_name,
                     data,
+                    lookup_table,
                 } = attr
                 {
                     if location == &AttributeLocation::Point && *num_comp == 1 {
@@ -352,13 +366,24 @@ impl GeometryData {
                             min_val, max_val, range
                         );
 
-                        // 获取颜色映射表
-                        let color_map = color_maps::get_color_map(table_name);
-                        println!(
-                            "使用颜色映射表: {} (颜色数量: {})",
-                            color_map.name,
-                            color_map.colors.len()
-                        );
+                        // 首先检查是否有对应的lookup table
+                        let color_lookup = if let Some(lut) = self.lookup_tables.get(table_name) {
+                            println!(
+                                "使用VTK文件中的lookup table: {} (颜色数量: {})",
+                                table_name,
+                                lut.len()
+                            );
+                            lut.clone()
+                        } else {
+                            // 如果没有找到对应的lookup table，使用默认的颜色映射
+                            let color_map = color_maps::get_color_map(table_name);
+                            println!(
+                                "使用默认颜色映射表: {} (颜色数量: {})",
+                                color_map.name,
+                                color_map.colors.len()
+                            );
+                            color_map.colors.to_vec()
+                        };
 
                         // 为每个顶点设置颜色
                         for (i, &val) in data.iter().enumerate() {
@@ -368,9 +393,17 @@ impl GeometryData {
                                 } else {
                                     0.5 // 防止除以0
                                 };
-                                println!("顶点 {}: 原始值={}, 归一化值={}", i, val, normalized);
-                                vertex_colors[i] = color_map.get_color(normalized);
-                                println!("    颜色: {:?}", vertex_colors[i]);
+
+                                // 使用lookup table获取颜色
+                                let color_index = if color_lookup.len() > 1 {
+                                    ((normalized * (color_lookup.len() - 1) as f32).round()
+                                        as usize)
+                                        .min(color_lookup.len() - 1)
+                                } else {
+                                    0
+                                };
+
+                                vertex_colors[i] = color_lookup[color_index];
                             }
                         }
 
@@ -391,6 +424,7 @@ impl GeometryData {
                     num_comp,
                     table_name,
                     data,
+                    lookup_table,
                 } = attr
                 {
                     if location == &AttributeLocation::Cell && *num_comp == 1 {
@@ -403,9 +437,20 @@ impl GeometryData {
                         let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
                         let range = max_val - min_val;
 
-                        // 获取颜色映射表
-                        let color_map = color_maps::get_color_map(table_name);
-                        println!("使用颜色映射表: {}", color_map.name);
+                        // 检查是否有提供的lookup table
+                        let color_lookup = if let Some(lut) = lookup_table {
+                            println!("使用VTK文件提供的lookup table (颜色数量: {})", lut.len());
+                            lut.clone()
+                        } else {
+                            // 如果没有提供lookup table，使用默认的颜色映射
+                            let color_map = color_maps::get_color_map(table_name);
+                            println!(
+                                "使用默认颜色映射表: {} (颜色数量: {})",
+                                color_map.name,
+                                color_map.colors.len()
+                            );
+                            color_map.colors.to_vec()
+                        };
 
                         // 使用映射关系
                         if let Some(mapping) = &self.triangle_to_cell_mapping {
@@ -428,8 +473,16 @@ impl GeometryData {
                                     0.5 // 防止除以0
                                 };
 
-                                // 使用颜色映射表获取颜色
-                                let color = color_map.get_color(normalized);
+                                // 使用lookup table获取颜色
+                                let color_index = if color_lookup.len() > 1 {
+                                    ((normalized * (color_lookup.len() - 1) as f32).round()
+                                        as usize)
+                                        .min(color_lookup.len() - 1)
+                                } else {
+                                    0
+                                };
+
+                                let color = color_lookup[color_index];
 
                                 // 获取这个三角形的三个顶点索引
                                 let triangle_base = triangle_idx * 3;
@@ -471,6 +524,40 @@ impl GeometryData {
 
         Ok(())
     }
+
+    // 从属性中提取所有lookup tables
+    pub fn extract_lookup_tables(&mut self) {
+        if let Some(attributes) = &self.attributes {
+            for ((name, _), attr) in attributes.iter() {
+                if name.starts_with("__lut_") {
+                    if let AttributeType::Scalar {
+                        table_name,
+                        lookup_table: Some(colors),
+                        ..
+                    } = attr
+                    {
+                        self.lookup_tables
+                            .insert(table_name.clone(), colors.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 获取指定名称的lookup table
+    pub fn get_lookup_table(&self, name: &str) -> Option<&Vec<[f32; 4]>> {
+        self.lookup_tables.get(name)
+    }
+
+    // 检查是否存在指定名称的lookup table
+    pub fn has_lookup_table(&self, name: &str) -> bool {
+        self.lookup_tables.contains_key(name)
+    }
+
+    // 获取所有lookup table的名称
+    pub fn get_lookup_table_names(&self) -> Vec<String> {
+        self.lookup_tables.keys().cloned().collect()
+    }
 }
 
 pub trait VtkMeshExtractor {
@@ -501,6 +588,94 @@ pub trait VtkMeshExtractor {
         name: &str,
         elem_type: &model::ElementType,
         data: &IOBuffer,
+    ) -> Result<(String, AttributeType), VtkError>;
+}
+
+impl UnstructuredGridExtractor {
+    // general triangulate cells - 使用通用三角化函数
+    fn triangulate_cells(&self, cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
+        triangulation::triangulate_cells(cells)
+    }
+}
+
+impl VtkMeshExtractor for UnstructuredGridExtractor {
+    type PieceType = Vec<model::Piece<model::UnstructuredGridPiece>>;
+
+    fn extract_attributes_legacy(
+        &self,
+        pieces: &Self::PieceType,
+    ) -> Result<HashMap<(String, AttributeLocation), AttributeType>, VtkError> {
+        let mut attributes = HashMap::new();
+        let piece = pieces
+            .first()
+            .ok_or(VtkError::MissingData("No pieces found"))?;
+
+        if let model::Piece::Inline(piece) = piece {
+            // 处理点数据属性
+            for point_data in &piece.data.point {
+                match point_data {
+                    model::Attribute::DataArray(array) => {
+                        if let Ok((name, attr)) =
+                            self.process_data_array(&array.name, &array.elem, &array.data)
+                        {
+                            attributes.insert((name, AttributeLocation::Point), attr);
+                        }
+                    }
+                    _ => println!("Unsupported attribute type"),
+                }
+            }
+
+            // 处理单元格数据属性
+            for cell_data in &piece.data.cell {
+                match cell_data {
+                    model::Attribute::DataArray(array) => {
+                        if let Ok((name, attr)) =
+                            self.process_data_array(&array.name, &array.elem, &array.data)
+                        {
+                            attributes.insert((name, AttributeLocation::Cell), attr);
+                        }
+                    }
+                    _ => println!("Unsupported attribute type"),
+                }
+            }
+        }
+
+        Ok(attributes)
+    }
+
+    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
+        if let Some(model::Piece::Inline(piece)) = pieces.into_iter().next() {
+            let (indices, _) = self.triangulate_cells(piece.cells);
+            indices
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError> {
+        let piece = pieces
+            .first()
+            .ok_or(VtkError::MissingData("No pieces found"))?;
+        let model::Piece::Inline(piece) = piece else {
+            return Err(VtkError::InvalidFormat("Expected inline data"));
+        };
+
+        let vertices = self.extract_vertices(&piece.points);
+        let (indices, triangle_to_cell_mapping) = self.triangulate_cells(piece.cells.clone()); // 使用clone来避免移动
+        let attributes = self.extract_attributes_legacy(&pieces)?;
+
+        let mut geometry = GeometryData::new(vertices, indices, attributes);
+        geometry.extract_lookup_tables(); // 提取lookup tables
+        geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
+
+        Ok(geometry)
+    }
+
+    fn process_data_array(
+        &self,
+        name: &str,
+        elem_type: &model::ElementType,
+        data: &IOBuffer,
     ) -> Result<(String, AttributeType), VtkError> {
         let values = data.cast_into::<f32>().unwrap();
 
@@ -522,6 +697,7 @@ pub trait VtkMeshExtractor {
                             .clone()
                             .unwrap_or_else(|| "default".to_string()),
                         data: values,
+                        lookup_table: None,
                     },
                 ))
             }
@@ -594,81 +770,44 @@ pub trait VtkMeshExtractor {
                 Ok((name.to_string(), AttributeType::Vector(tensors)))
             }
             model::ElementType::LookupTable => {
-                println!("Lookup table data is not supported, simplified processing");
-                Err(VtkError::UnsupportedDataType)
+                // Convert the lookup table data into RGBA colors
+                let colors: Vec<[f32; 4]> = values
+                    .chunks_exact(4)
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3]])
+                    .collect();
+
+                println!(
+                    "Processed lookup table {} with {} colors",
+                    name,
+                    colors.len()
+                );
+
+                // 返回lookup table作为一个特殊的标量属性
+                Ok((
+                    format!("__lut_{}", name), // 使用特殊前缀标记lookup table
+                    AttributeType::Scalar {
+                        num_comp: 4, // RGBA
+                        table_name: name.to_string(),
+                        data: values,
+                        lookup_table: Some(colors),
+                    },
+                ))
             }
             model::ElementType::Generic(desc) => {
                 println!("Generic type: {:?} is not fully supported", desc);
                 Err(VtkError::UnsupportedDataType)
             }
+            _ => {
+                println!("Unsupported data type");
+                Err(VtkError::UnsupportedDataType)
+            }
         }
-    }
-}
-
-pub struct UnstructuredGridExtractor;
-pub struct PolyDataExtractor;
-
-impl VtkMeshExtractor for UnstructuredGridExtractor {
-    type PieceType = Vec<model::Piece<model::UnstructuredGridPiece>>;
-
-    fn extract_attributes_legacy(
-        &self,
-        pieces: &Self::PieceType,
-    ) -> Result<HashMap<(String, AttributeLocation), AttributeType>, VtkError> {
-        todo!()
-    }
-    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
-        if let Some(model::Piece::Inline(piece)) = pieces.into_iter().next() {
-            let (indices, _) = self.triangulate_cells(piece.cells);
-            indices
-        } else {
-            // 如果没有内联数据，返回空向量
-            Vec::new()
-        }
-    }
-
-    fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError> {
-        let piece = pieces
-            .first()
-            .ok_or(VtkError::MissingData("No pieces found"))?;
-        let model::Piece::Inline(piece) = piece else {
-            return Err(VtkError::InvalidFormat("Expected inline data"));
-        };
-
-        let vertices = self.extract_vertices(&piece.points);
-
-        // 获取索引和映射表
-        let (indices, triangle_to_cell_mapping) =
-            if let Some(model::Piece::Inline(p)) = pieces.into_iter().next() {
-                self.triangulate_cells(p.cells)
-            } else {
-                (Vec::new(), Vec::new())
-            };
-
-        // use bevy interface to compute normals
-        // let normals = compute_normals(&vertices, &indices);
-        let tmp: HashMap<(String, AttributeLocation), AttributeType> = HashMap::new();
-        let mut geometry = GeometryData::new(vertices, indices, tmp);
-        geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
-        Ok(geometry)
-    }
-}
-impl UnstructuredGridExtractor {
-    // general triangulate cells - 使用通用三角化函数
-    fn triangulate_cells(&self, cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
-        triangulation::triangulate_cells(cells)
     }
 }
 
 impl VtkMeshExtractor for PolyDataExtractor {
     type PieceType = Vec<model::Piece<model::PolyDataPiece>>;
-    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
-        if let Ok((indices, _)) = self.process_polydata(pieces) {
-            indices
-        } else {
-            Vec::new()
-        }
-    }
+
     fn extract_attributes_legacy(
         &self,
         pieces: &Self::PieceType,
@@ -698,12 +837,7 @@ impl VtkMeshExtractor for PolyDataExtractor {
                             attributes.insert((name, AttributeLocation::Point), attr_type);
                         }
                     }
-                    model::Attribute::Field {
-                        name: _,
-                        data_array: _,
-                    } => {
-                        println!("警告: Field属性暂不支持");
-                    }
+                    _ => println!("Unsupported attribute type"),
                 }
             }
         }
@@ -721,19 +855,22 @@ impl VtkMeshExtractor for PolyDataExtractor {
                             attributes.insert((name, AttributeLocation::Cell), attr_type);
                         }
                     }
-                    model::Attribute::Field {
-                        name: _,
-                        data_array: _,
-                    } => {
-                        // todo!("Field属性暂不支持")
-                        println!("警告: Field属性暂不支持");
-                    }
+                    _ => println!("Unsupported attribute type"),
                 }
             }
         }
 
         Ok(attributes)
     }
+
+    fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
+        if let Ok((indices, _)) = self.process_polydata(pieces) {
+            indices
+        } else {
+            Vec::new()
+        }
+    }
+
     fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError> {
         let piece = pieces
             .first()
@@ -742,16 +879,133 @@ impl VtkMeshExtractor for PolyDataExtractor {
             return Err(VtkError::InvalidFormat("Expected inline data".into()));
         };
 
-        let attributes = self.extract_attributes_legacy(&pieces);
-
+        let attributes = self.extract_attributes_legacy(&pieces)?;
         let vertices = self.extract_vertices(&piece.points);
-
-        // 获取索引和映射表
         let (indices, triangle_to_cell_mapping) = self.process_polydata(pieces.clone())?;
 
-        let mut geometry = GeometryData::new(vertices, indices, attributes?);
+        let mut geometry = GeometryData::new(vertices, indices, attributes);
+        geometry.extract_lookup_tables(); // 提取lookup tables
         geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
+
         Ok(geometry)
+    }
+
+    fn process_data_array(
+        &self,
+        name: &str,
+        elem_type: &model::ElementType,
+        data: &IOBuffer,
+    ) -> Result<(String, AttributeType), VtkError> {
+        let values = data.cast_into::<f32>().unwrap();
+
+        match elem_type {
+            model::ElementType::Scalars {
+                num_comp,
+                lookup_table,
+            } => {
+                println!(
+                    "Processing scalar data: {} components, lookup table: {:?}",
+                    num_comp, lookup_table
+                );
+
+                Ok((
+                    name.to_string(),
+                    AttributeType::Scalar {
+                        num_comp: *num_comp as usize,
+                        table_name: lookup_table
+                            .clone()
+                            .unwrap_or_else(|| "default".to_string()),
+                        data: values,
+                        lookup_table: None,
+                    },
+                ))
+            }
+            model::ElementType::ColorScalars(nvalues) => {
+                let color_values = values
+                    .chunks_exact(*nvalues as usize)
+                    .map(|v| v.to_vec())
+                    .collect();
+
+                Ok((
+                    name.to_string(),
+                    AttributeType::ColorScalar {
+                        nvalues: *nvalues,
+                        data: color_values,
+                    },
+                ))
+            }
+            model::ElementType::Vectors => {
+                let vectors: Vec<[f32; 3]> = values
+                    .chunks_exact(3)
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+                    .collect();
+
+                Ok((name.to_string(), AttributeType::Vector(vectors)))
+            }
+            model::ElementType::Normals => {
+                let normals: Vec<[f32; 3]> = values
+                    .chunks_exact(3)
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+                    .collect();
+
+                Ok((name.to_string(), AttributeType::Vector(normals)))
+            }
+            model::ElementType::TCoords(n) => {
+                println!("Texture coordinates: {} components", n);
+                let coords: Vec<[f32; 3]> = if *n == 2 {
+                    values
+                        .chunks_exact(2)
+                        .map(|chunk| [chunk[0], chunk[1], 0.0])
+                        .collect()
+                } else if *n == 3 {
+                    values
+                        .chunks_exact(3)
+                        .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+                        .collect()
+                } else {
+                    return Err(VtkError::InvalidFormat(
+                        "Unsupported texture coordinate dimension",
+                    ));
+                };
+
+                Ok((name.to_string(), AttributeType::Vector(coords)))
+            }
+            model::ElementType::Tensors => {
+                println!("Tensor data is not fully supported, simplified processing");
+                let tensors: Vec<[f32; 3]> = values
+                    .chunks_exact(9)
+                    .map(|chunk| [chunk[0], chunk[4], chunk[8]])
+                    .collect();
+
+                Ok((name.to_string(), AttributeType::Vector(tensors)))
+            }
+            model::ElementType::LookupTable => {
+                let colors: Vec<[f32; 4]> = values
+                    .chunks_exact(4)
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3]])
+                    .collect();
+
+                println!(
+                    "Processed lookup table {} with {} colors",
+                    name,
+                    colors.len()
+                );
+
+                Ok((
+                    format!("__lut_{}", name),
+                    AttributeType::Scalar {
+                        num_comp: 4,
+                        table_name: name.to_string(),
+                        data: values,
+                        lookup_table: Some(colors),
+                    },
+                ))
+            }
+            _ => {
+                println!("Unsupported data type");
+                Err(VtkError::UnsupportedDataType)
+            }
+        }
     }
 }
 
