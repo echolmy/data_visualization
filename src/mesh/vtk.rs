@@ -1,8 +1,6 @@
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::mesh::VertexAttributeValues;
 use bevy::utils::HashMap;
-use std::path::PathBuf;
 
 use super::VtkError;
 use crate::mesh::triangulation;
@@ -55,7 +53,7 @@ impl GeometryData {
     }
 
     // add attribute data
-    pub fn with_attributes(
+    pub fn add_attributes(
         mut self,
         attributes: HashMap<(String, AttributeLocation), AttributeType>,
     ) -> Self {
