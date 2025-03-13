@@ -1,4 +1,5 @@
 use std::fmt;
+pub mod color_maps;
 pub mod triangulation;
 pub mod vtk;
 use bevy::prelude::*;
