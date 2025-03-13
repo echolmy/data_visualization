@@ -37,15 +37,19 @@ pub enum VtkError {
 impl fmt::Display for VtkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VtkError::LoadError(msg) => write!(f, "加载VTK文件错误: {}", msg),
-            VtkError::InvalidFormat(detail) => write!(f, "VTK格式无效: {}", detail),
-            VtkError::UnsupportedDataType => write!(f, "不支持的数据类型"),
-            VtkError::MissingData(what) => write!(f, "缺少数据: {}", what),
+            VtkError::LoadError(msg) => write!(f, "Load VTK file error: {}", msg),
+            VtkError::InvalidFormat(detail) => write!(f, "Invalid VTK format: {}", detail),
+            VtkError::UnsupportedDataType => write!(f, "Unsupported data type"),
+            VtkError::MissingData(what) => write!(f, "Missing data: {}", what),
             VtkError::IndexOutOfBounds { index, max } => {
-                write!(f, "索引超出边界: {} (最大值为 {})", index, max)
+                write!(f, "Index out of bounds: {} (max is {})", index, max)
             }
             VtkError::DataTypeMismatch { expected, found } => {
-                write!(f, "数据类型不匹配: 期望 {}, 找到 {}", expected, found)
+                write!(
+                    f,
+                    "Data type mismatch: expected {}, found {}",
+                    expected, found
+                )
             }
             VtkError::AttributeMismatch {
                 attribute_size,
@@ -53,13 +57,13 @@ impl fmt::Display for VtkError {
             } => {
                 write!(
                     f,
-                    "属性大小不匹配: 属性大小 {}, 期望 {}",
+                    "Attribute size mismatch: attribute size {}, expected {}",
                     attribute_size, expected_size
                 )
             }
-            VtkError::ConversionError(msg) => write!(f, "转换错误: {}", msg),
-            VtkError::IoError(err) => write!(f, "IO错误: {}", err),
-            VtkError::GenericError(msg) => write!(f, "错误: {}", msg),
+            VtkError::ConversionError(msg) => write!(f, "Conversion error: {}", msg),
+            VtkError::IoError(err) => write!(f, "IO error: {}", err),
+            VtkError::GenericError(msg) => write!(f, "Error: {}", msg),
         }
     }
 }
@@ -93,20 +97,23 @@ pub fn process_vtk_file_legacy(path: &PathBuf) -> Result<Mesh, VtkError> {
         }
     }
 
-    println!("提取的几何数据属性信息: {:?}", &geometry.attributes);
+    println!(
+        "Extracted geometry data attributes: {:?}",
+        &geometry.attributes
+    );
 
-    // 创建带属性的网格
+    // create a mesh with attributes
     let mut mesh = create_mesh_legacy(geometry.clone());
 
-    // 应用颜色属性
+    // apply color attributes
     let _ = geometry.apply_cell_color_scalars(&mut mesh);
 
-    // 如果没有单元格颜色，尝试应用点颜色
+    // if there is no cell color, try to apply point color
     if mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_none() {
         let _ = geometry.apply_point_color_scalars(&mut mesh);
     }
 
-    // 应用其他标量属性（如果有）
+    // apply other scalar attributes (if any)
     let _ = geometry.apply_scalar_attributes(&mut mesh);
 
     Ok(mesh)
