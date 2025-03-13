@@ -59,7 +59,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
     // 遍历所有单元格
     for cell_idx in 0..num_cells {
         if data_iter.peek().is_none() {
-            println!("警告: 数据迭代器为空，可能未完全解析");
+            println!("Warning: Data iterator is empty, possibly not fully parsed");
             break;
         }
 
@@ -67,7 +67,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
         let num_vertices = match data_iter.next() {
             Some(n) => n as usize,
             None => {
-                println!("警告: 缺少顶点数量");
+                println!("Warning: Missing vertex count");
                 break;
             }
         };
@@ -77,7 +77,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
 
         if vertices.len() != num_vertices {
             println!(
-                "警告: 获取的顶点数({})少于预期({})",
+                "Warning: Vertex count ({}) less than expected ({})",
                 vertices.len(),
                 num_vertices
             );
@@ -85,7 +85,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
 
         if vertices.len() < 3 {
             // 顶点少于3个，无法形成三角形
-            println!("警告: 顶点数量不足，无法形成三角形");
+            println!("Warning: Insufficient vertex count, cannot form triangles");
             continue;
         }
 
@@ -124,7 +124,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
         let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
         if triangles_added != mappings_added {
             println!(
-                "警告: 三角形数量({})与映射数量({})不匹配",
+                "Warning: Triangle count ({}) does not match mapping count ({})",
                 triangles_added, mappings_added
             );
             // 补齐映射
@@ -136,7 +136,7 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
 
     // 检查是否有剩余数据
     if data_iter.next().is_some() {
-        println!("警告: 处理后仍有额外数据剩余，可能未完全解析");
+        println!("Warning: There is still extra data remaining after processing, possibly not fully parsed");
     }
 
     (indices, triangle_to_cell_mapping)
@@ -238,7 +238,7 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
         let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
         if triangles_added != mappings_added {
             println!(
-                "警告: 三角形数量({})与映射数量({})不匹配",
+                "Warning: Triangle count ({}) does not match mapping count ({})",
                 triangles_added, mappings_added
             );
             // 补齐映射

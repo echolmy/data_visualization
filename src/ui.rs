@@ -110,13 +110,13 @@ fn load_resource(
                             Visibility::Visible,
                         ));
 
-                        println!("生成的网格顶点数: {:?}", mesh.count_vertices());
+                        println!("number of vertices: {:?}", mesh.count_vertices());
                     }
                     Err(err) => {
-                        println!("加载VTK文件失败: {:?}", err);
+                        println!("load VTK file failed: {:?}", err);
                         // 显示错误消息到UI
-                        egui::Window::new("错误").show(egui_context.ctx_mut(), |ui| {
-                            ui.label(format!("加载文件失败: {:?}", err));
+                        egui::Window::new("Error").show(egui_context.ctx_mut(), |ui| {
+                            ui.label(format!("load file failed: {:?}", err));
                         });
                     }
                 }
@@ -125,15 +125,15 @@ fn load_resource(
             //      .vtr (矩形网格), .vti (图像数据)
             Some("vtu" | "vtp" | "vts" | "vtr" | "vti") => {
                 // 显示暂不支持的消息
-                egui::Window::new("提示").show(egui_context.ctx_mut(), |ui| {
-                    ui.label("目前暂不支持该格式，正在开发中...");
+                egui::Window::new("Note").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("currently not supported this format, developing...");
                 });
             }
             _ => {
-                println!("目前不支持其他格式，请选择另一个模型。");
+                println!("currently not supported other formats, please select another model.");
                 // 显示不支持的消息
-                egui::Window::new("不支持的格式").show(egui_context.ctx_mut(), |ui| {
-                    ui.label("不支持此文件格式，请选择.obj或.vtk文件。");
+                egui::Window::new("Not supported format").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("not supported this file format, please select .obj or .vtk file.");
                 });
             }
         };
