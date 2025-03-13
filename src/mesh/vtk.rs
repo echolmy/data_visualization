@@ -403,7 +403,23 @@ impl GeometryData {
                                     0
                                 };
 
-                                vertex_colors[i] = color_lookup[color_index];
+                                // 获取颜色并确保所有值都在有效范围内
+                                let mut color = color_lookup[color_index];
+                                // 确保RGB值在[0.0, 1.0]范围内
+                                for j in 0..3 {
+                                    color[j] = color[j].clamp(0.0, 1.0);
+                                }
+                                // 确保alpha值为1.0（完全不透明）
+                                color[3] = 1.0;
+
+                                // 打印调试信息
+                                if i < 10 {
+                                    // 只打印前10个顶点的信息，避免输出过多
+                                    println!("顶点 {}: 标量值 = {}, 归一化值 = {:.3}, 颜色索引 = {}, 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                        i, val, normalized, color_index, color[0], color[1], color[2], color[3]);
+                                }
+
+                                vertex_colors[i] = color;
                             }
                         }
 
@@ -420,6 +436,117 @@ impl GeometryData {
 
             // 如果没有点标量，则处理单元格标量
             for ((name, location), attr) in attributes.iter() {
+                if let AttributeType::ColorScalar { nvalues, data } = attr {
+                    if location == &AttributeLocation::Cell {
+                        println!("处理单元格颜色标量属性: {} (nvalues: {})", name, nvalues);
+                        println!("颜色数据: {:?}", data);
+
+                        let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
+
+                        // 使用映射关系
+                        if let Some(mapping) = &self.triangle_to_cell_mapping {
+                            println!("使用三角形到单元格映射");
+                            for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
+                                // 检查cell_idx是否有效
+                                if cell_idx >= data.len() {
+                                    println!(
+                                        "警告: 单元格索引 {} 超出颜色数据范围 {}",
+                                        cell_idx,
+                                        data.len()
+                                    );
+                                    continue;
+                                }
+
+                                // 获取这个三角形的三个顶点索引
+                                let triangle_base = triangle_idx * 3;
+                                if triangle_base + 2 >= self.indices.len() {
+                                    println!(
+                                        "警告: 三角形索引 {} 超出索引范围 {}",
+                                        triangle_base,
+                                        self.indices.len()
+                                    );
+                                    continue;
+                                }
+
+                                let vertex_indices = [
+                                    self.indices[triangle_base] as usize,
+                                    self.indices[triangle_base + 1] as usize,
+                                    self.indices[triangle_base + 2] as usize,
+                                ];
+
+                                // 获取对应单元格的颜色
+                                let colors = &data[cell_idx];
+                                let color = match nvalues {
+                                    3 => [colors[0], colors[1], colors[2], 1.0],
+                                    4 => [colors[0], colors[1], colors[2], colors[3]],
+                                    _ => [1.0, 1.0, 1.0, 1.0], // default color white
+                                };
+
+                                println!(
+                                    "三角形 {}, 单元格 {}: 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                    triangle_idx, cell_idx, color[0], color[1], color[2], color[3]
+                                );
+
+                                // 设置顶点颜色
+                                for &idx in &vertex_indices {
+                                    if idx < vertex_colors.len() {
+                                        vertex_colors[idx] = color;
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("没有三角形到单元格映射，使用默认映射");
+                            // 回退到原始方法，按顺序一一对应
+                            let num_triangles = self.indices.len() / 3;
+                            for triangle_idx in 0..num_triangles {
+                                if triangle_idx >= data.len() {
+                                    println!(
+                                        "警告: 三角形索引 {} 超出颜色数据范围 {}",
+                                        triangle_idx,
+                                        data.len()
+                                    );
+                                    break;
+                                }
+
+                                // 获取这个三角形的三个顶点索引
+                                let vertex_indices = [
+                                    self.indices[triangle_idx * 3] as usize,
+                                    self.indices[triangle_idx * 3 + 1] as usize,
+                                    self.indices[triangle_idx * 3 + 2] as usize,
+                                ];
+
+                                // 获取这个cell的颜色
+                                let colors = &data[triangle_idx];
+                                let color = match nvalues {
+                                    3 => [colors[0], colors[1], colors[2], 1.0],
+                                    4 => [colors[0], colors[1], colors[2], colors[3]],
+                                    _ => [1.0, 1.0, 1.0, 1.0], // default color white
+                                };
+
+                                println!(
+                                    "三角形 {}: 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                    triangle_idx, color[0], color[1], color[2], color[3]
+                                );
+
+                                // 设置顶点颜色
+                                for &idx in &vertex_indices {
+                                    if idx < vertex_colors.len() {
+                                        vertex_colors[idx] = color;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 插入颜色属性
+                        mesh.insert_attribute(
+                            Mesh::ATTRIBUTE_COLOR,
+                            VertexAttributeValues::from(vertex_colors),
+                        );
+                        println!("单元格颜色标量已插入网格");
+                        return Ok(());
+                    }
+                }
+
                 if let AttributeType::Scalar {
                     num_comp,
                     table_name,
@@ -506,6 +633,13 @@ impl GeometryData {
                                     if idx < vertex_colors.len() {
                                         vertex_colors[idx] = color;
                                     }
+                                }
+
+                                // 打印调试信息
+                                if triangle_idx < 10 {
+                                    // 只打印前10个三角形的信息
+                                    println!("三角形 {}, 单元格 {}: 标量值 = {}, 归一化值 = {:.3}, 颜色索引 = {}, 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                        triangle_idx, cell_idx, val, normalized, color_index, color[0], color[1], color[2], color[3]);
                                 }
                             }
                         }

@@ -83,6 +83,9 @@ pub fn process_vtk_file_legacy(path: &PathBuf) -> Result<Mesh, VtkError> {
     let vtk = Vtk::import(PathBuf::from(format!("{}", path.to_string_lossy())))
         .map_err(|e| VtkError::LoadError(e.to_string()))?;
 
+    // 打印VTK文件的基本信息
+    print_vtk_info(&vtk);
+
     match vtk.data {
         model::DataSet::UnstructuredGrid { meta: _, pieces } => {
             let extractor = UnstructuredGridExtractor;
@@ -102,19 +105,54 @@ pub fn process_vtk_file_legacy(path: &PathBuf) -> Result<Mesh, VtkError> {
         &geometry.attributes
     );
 
-    // create a mesh with attributes
-    let mut mesh = create_mesh_legacy(geometry.clone());
+    // 打印几何数据的基本信息
+    print_geometry_info(&geometry);
 
-    // apply color attributes
-    let _ = geometry.apply_cell_color_scalars(&mut mesh);
+    // 创建基本网格
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
 
-    // if there is no cell color, try to apply point color
-    if mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_none() {
-        let _ = geometry.apply_point_color_scalars(&mut mesh);
+    // 添加顶点位置
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        VertexAttributeValues::from(geometry.vertices.clone()),
+    );
+
+    // 添加顶点索引
+    mesh.insert_indices(Indices::U32(geometry.indices.clone()));
+
+    // 计算法线
+    mesh.compute_normals();
+
+    // 按优先级应用颜色属性
+    // 1. 首先尝试应用标量属性（通常是最重要的数据）
+    let scalar_applied = geometry.apply_scalar_attributes(&mut mesh).is_ok();
+    println!("Scalar attributes applied: {}", scalar_applied);
+
+    // 2. 如果没有标量属性，尝试应用单元格颜色
+    if !scalar_applied {
+        let cell_color_applied = geometry.apply_cell_color_scalars(&mut mesh).is_ok();
+        println!("Cell color attributes applied: {}", cell_color_applied);
+
+        // 3. 如果没有单元格颜色，尝试应用点颜色
+        if !cell_color_applied {
+            let point_color_applied = geometry.apply_point_color_scalars(&mut mesh).is_ok();
+            println!("Point color attributes applied: {}", point_color_applied);
+
+            // 4. 如果没有任何颜色属性，应用默认颜色
+            if !point_color_applied {
+                println!("No color attributes found, applying default colors");
+                // 默认使用白色
+                let default_colors = vec![[1.0, 1.0, 1.0, 1.0]; geometry.vertices.len()];
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_COLOR,
+                    VertexAttributeValues::from(default_colors),
+                );
+            }
+        }
     }
-
-    // apply other scalar attributes (if any)
-    let _ = geometry.apply_scalar_attributes(&mut mesh);
 
     Ok(mesh)
 }
@@ -144,6 +182,87 @@ pub fn create_mesh_legacy(geometry: GeometryData) -> Mesh {
     mesh.compute_normals();
 
     mesh
+}
+
+/// 打印VTK文件的基本信息
+fn print_vtk_info(vtk: &Vtk) {
+    println!("VTK文件信息:");
+    println!("  版本: {:?}", vtk.version);
+    println!("  标题: {}", vtk.title);
+
+    match &vtk.data {
+        model::DataSet::UnstructuredGrid { meta, pieces } => {
+            println!("  数据类型: UnstructuredGrid");
+            println!("  元数据: {:?}", meta);
+            println!("  片段数量: {}", pieces.len());
+        }
+        model::DataSet::PolyData { meta, pieces } => {
+            println!("  数据类型: PolyData");
+            println!("  元数据: {:?}", meta);
+            println!("  片段数量: {}", pieces.len());
+        }
+        _ => println!("  数据类型: 其他"),
+    }
+}
+
+/// 打印几何数据的基本信息
+fn print_geometry_info(geometry: &GeometryData) {
+    println!("几何数据信息:");
+    println!("  顶点数量: {}", geometry.vertices.len());
+    println!("  索引数量: {}", geometry.indices.len());
+    println!("  三角形数量: {}", geometry.indices.len() / 3);
+
+    if let Some(attributes) = &geometry.attributes {
+        println!("  属性数量: {}", attributes.len());
+
+        for ((name, location), attr) in attributes.iter() {
+            match attr {
+                AttributeType::Scalar {
+                    num_comp,
+                    table_name,
+                    data,
+                    lookup_table,
+                } => {
+                    println!("  标量属性: {} (位置: {:?})", name, location);
+                    println!("    组件数量: {}", num_comp);
+                    println!("    查找表名称: {}", table_name);
+                    println!("    数据长度: {}", data.len());
+                    if let Some(lut) = lookup_table {
+                        println!("    查找表颜色数量: {}", lut.len());
+                    }
+                }
+                AttributeType::ColorScalar { nvalues, data } => {
+                    println!("  颜色标量属性: {} (位置: {:?})", name, location);
+                    println!("    值数量: {}", nvalues);
+                    println!("    数据长度: {}", data.len());
+                }
+                AttributeType::Vector(data) => {
+                    println!("  向量属性: {} (位置: {:?})", name, location);
+                    println!("    数据长度: {}", data.len());
+                }
+            }
+        }
+    } else {
+        println!("  没有属性");
+    }
+
+    println!("  查找表数量: {}", geometry.lookup_tables.len());
+    for (name, colors) in &geometry.lookup_tables {
+        println!("    查找表: {} (颜色数量: {})", name, colors.len());
+        if !colors.is_empty() {
+            println!(
+                "      第一个颜色: [{:.2}, {:.2}, {:.2}, {:.2}]",
+                colors[0][0], colors[0][1], colors[0][2], colors[0][3]
+            );
+            println!(
+                "      最后一个颜色: [{:.2}, {:.2}, {:.2}, {:.2}]",
+                colors[colors.len() - 1][0],
+                colors[colors.len() - 1][1],
+                colors[colors.len() - 1][2],
+                colors[colors.len() - 1][3]
+            );
+        }
+    }
 }
 
 //**************************************************************************//
