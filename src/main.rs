@@ -1,6 +1,7 @@
 mod camera;
 mod environment;
 mod mesh;
+mod render;
 mod ui;
 
 use bevy::prelude::*;
@@ -8,6 +9,7 @@ use bevy_egui::*;
 use bevy_obj::ObjPlugin;
 use camera::CameraPlugin;
 use environment::EnvironmentPlugin;
+use render::WireframeRenderPlugin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use ui::UIPlugin;
 
@@ -29,14 +31,9 @@ fn main() {
         .add_plugins(UIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(EnvironmentPlugin)
-        .add_systems(Startup, setup)
+        .add_plugins(WireframeRenderPlugin)
         .add_systems(Update, debug_mesh_colors)
         .run();
-}
-
-/// set up a simple 3D scene
-fn setup(mut commands: Commands) {
-    // 这里可能需要添加一些模型加载或其他初始化代码
 }
 
 fn debug_mesh_colors(meshes: Res<Assets<Mesh>>, query: Query<&Mesh3d>) {

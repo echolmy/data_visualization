@@ -1,6 +1,6 @@
 mod events;
 use crate::mesh;
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
@@ -70,6 +70,7 @@ fn file_dialog_system(
     }
 }
 
+/// 加载资源文件
 fn load_resource(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -144,6 +145,7 @@ fn load_resource(
                             }
                         }
 
+                        // 创建实体，移除直接添加的Wireframe组件
                         commands.spawn((
                             Mesh3d(meshes.add(mesh.clone())),
                             MeshMaterial3d(materials.add(StandardMaterial {
@@ -202,6 +204,6 @@ fn load_resource(
                     });
                 }
             }
-        };
+        }
     }
 }
