@@ -186,34 +186,34 @@ pub fn create_mesh_legacy(geometry: GeometryData) -> Mesh {
 
 /// 打印VTK文件的基本信息
 fn print_vtk_info(vtk: &Vtk) {
-    println!("VTK文件信息:");
-    println!("  版本: {:?}", vtk.version);
-    println!("  标题: {}", vtk.title);
+    println!("VTK file information:");
+    println!("  Version: {:?}", vtk.version);
+    println!("  Title: {}", vtk.title);
 
     match &vtk.data {
         model::DataSet::UnstructuredGrid { meta, pieces } => {
-            println!("  数据类型: UnstructuredGrid");
-            println!("  元数据: {:?}", meta);
-            println!("  片段数量: {}", pieces.len());
+            println!("  Data type: UnstructuredGrid");
+            println!("  Meta data: {:?}", meta);
+            println!("  Pieces number: {}", pieces.len());
         }
         model::DataSet::PolyData { meta, pieces } => {
-            println!("  数据类型: PolyData");
-            println!("  元数据: {:?}", meta);
-            println!("  片段数量: {}", pieces.len());
+            println!("  Data type: PolyData");
+            println!("  Meta data: {:?}", meta);
+            println!("  Pieces number: {}", pieces.len());
         }
-        _ => println!("  数据类型: 其他"),
+        _ => println!("  Data type: Other"),
     }
 }
 
 /// 打印几何数据的基本信息
 fn print_geometry_info(geometry: &GeometryData) {
-    println!("几何数据信息:");
-    println!("  顶点数量: {}", geometry.vertices.len());
-    println!("  索引数量: {}", geometry.indices.len());
-    println!("  三角形数量: {}", geometry.indices.len() / 3);
+    println!("Geometry data information:");
+    println!("  Vertex number: {}", geometry.vertices.len());
+    println!("  Index number: {}", geometry.indices.len());
+    println!("  Triangle number: {}", geometry.indices.len() / 3);
 
     if let Some(attributes) = &geometry.attributes {
-        println!("  属性数量: {}", attributes.len());
+        println!("  Attribute number: {}", attributes.len());
 
         for ((name, location), attr) in attributes.iter() {
             match attr {
@@ -223,39 +223,42 @@ fn print_geometry_info(geometry: &GeometryData) {
                     data,
                     lookup_table,
                 } => {
-                    println!("  标量属性: {} (位置: {:?})", name, location);
-                    println!("    组件数量: {}", num_comp);
-                    println!("    查找表名称: {}", table_name);
-                    println!("    数据长度: {}", data.len());
+                    println!("  Scalar attribute: {} (location: {:?})", name, location);
+                    println!("    Component number: {}", num_comp);
+                    println!("    Lookup table name: {}", table_name);
+                    println!("    Data length: {}", data.len());
                     if let Some(lut) = lookup_table {
-                        println!("    查找表颜色数量: {}", lut.len());
+                        println!("    Lookup table color number: {}", lut.len());
                     }
                 }
                 AttributeType::ColorScalar { nvalues, data } => {
-                    println!("  颜色标量属性: {} (位置: {:?})", name, location);
-                    println!("    值数量: {}", nvalues);
-                    println!("    数据长度: {}", data.len());
+                    println!(
+                        "  Color scalar attribute: {} (location: {:?})",
+                        name, location
+                    );
+                    println!("    Value number: {}", nvalues);
+                    println!("    Data length: {}", data.len());
                 }
                 AttributeType::Vector(data) => {
-                    println!("  向量属性: {} (位置: {:?})", name, location);
-                    println!("    数据长度: {}", data.len());
+                    println!("  Vector attribute: {} (location: {:?})", name, location);
+                    println!("    Data length: {}", data.len());
                 }
             }
         }
     } else {
-        println!("  没有属性");
+        println!("  No attributes");
     }
 
-    println!("  查找表数量: {}", geometry.lookup_tables.len());
+    println!("  Lookup table number: {}", geometry.lookup_tables.len());
     for (name, colors) in &geometry.lookup_tables {
-        println!("    查找表: {} (颜色数量: {})", name, colors.len());
+        println!("  Lookup table: {} (color number: {})", name, colors.len());
         if !colors.is_empty() {
             println!(
-                "      第一个颜色: [{:.2}, {:.2}, {:.2}, {:.2}]",
+                "    First color: [{:.2}, {:.2}, {:.2}, {:.2}]",
                 colors[0][0], colors[0][1], colors[0][2], colors[0][3]
             );
             println!(
-                "      最后一个颜色: [{:.2}, {:.2}, {:.2}, {:.2}]",
+                "    Last color: [{:.2}, {:.2}, {:.2}, {:.2}]",
                 colors[colors.len() - 1][0],
                 colors[colors.len() - 1][1],
                 colors[colors.len() - 1][2],
