@@ -122,22 +122,3 @@ fn toggle_wireframe(
         }
     }
 }
-
-// 以下是用于演示如何使用此插件的main函数
-// 在实际应用中，您应该将此插件添加到您的应用程序中
-#[allow(dead_code)]
-fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins.set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
-                    // 注意：这是一个仅原生平台支持的功能，不适用于webgl或webgpu
-                    features: WgpuFeatures::POLYGON_MODE_LINE,
-                    ..default()
-                }),
-                ..default()
-            }),
-            WireframeRenderPlugin,
-        ))
-        .run();
-}
