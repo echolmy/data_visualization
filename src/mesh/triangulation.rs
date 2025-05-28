@@ -173,6 +173,27 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
 
         // process data according to topology
         match cell_type {
+            // vertex
+            model::CellType::Vertex => {
+                // validate vertex count
+                if num_vertices != 1 {
+                    panic!("Invalid vertex count: {} (expected 1)", num_vertices);
+                }
+                // convert single vertex to degenerate triangle (use same vertex three times)
+                indices.extend_from_slice(&[vertices[0], vertices[0], vertices[0]]);
+                // add mapping relation
+                triangle_to_cell_mapping.push(cell_idx as usize);
+            }
+            // line
+            model::CellType::Line => {
+                if num_vertices != 2 {
+                    panic!("Invalid line vertex count: {} (expected 2)", num_vertices);
+                }
+                // convert line to degenerate triangle (use two same vertices)
+                indices.extend_from_slice(&[vertices[0], vertices[1], vertices[1]]);
+                // add mapping relation
+                triangle_to_cell_mapping.push(cell_idx as usize);
+            }
             // triangle
             model::CellType::Triangle => {
                 if num_vertices != 3 {
