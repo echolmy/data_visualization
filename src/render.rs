@@ -12,6 +12,7 @@ use bevy::{
     },
 };
 
+use crate::ui::events::ToggleWireframeEvent;
 use crate::Mesh3d;
 
 // 用于跟踪是否已经处理过mesh实体
@@ -39,6 +40,7 @@ impl Plugin for WireframeRenderPlugin {
 /// 这个系统允许切换线框渲染设置
 fn toggle_wireframe(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut wireframe_toggle_events: EventReader<ToggleWireframeEvent>,
     mut config: ResMut<WireframeConfig>,
     query: Query<(Entity, Option<&NoWireframe>, Option<&ProcessedForWireframe>), With<Mesh3d>>,
     wireframe_query: Query<Entity, With<Wireframe>>,
@@ -58,8 +60,11 @@ fn toggle_wireframe(
 
     // 移除自动添加Wireframe组件的代码，只在用户按键时添加
 
-    // 按Z键切换全局线框模式
-    if keyboard_input.just_pressed(KeyCode::KeyZ) {
+    // 按Z键或UI按钮切换全局线框模式
+    let should_toggle = keyboard_input.just_pressed(KeyCode::KeyZ)
+        || wireframe_toggle_events.read().next().is_some();
+
+    if should_toggle {
         config.global = !config.global;
         info!(
             "切换全局线框模式: {}",
