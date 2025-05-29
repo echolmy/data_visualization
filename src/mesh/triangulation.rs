@@ -142,23 +142,24 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
     (indices, triangle_to_cell_mapping)
 }
 
-/// 三角化不同类型的单元格
+/// triangulate different types of cells, used for UnstructuredGrid type
 ///
-/// # 参数
-/// * `cells` - 单元格数据
+/// # parameters
+/// * `cells` - cell data
 ///
-/// # 返回值
-/// * (三角形索引列表, 三角形到原始单元格的映射)
+/// # return value
+/// * (triangle index list, triangle to original cell mapping)
 pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
+    // 1. initialize parameters
     // allocate memory according to triangle initially, if small, it will re-allocate
     let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
     let mut triangle_to_cell_mapping = Vec::new();
     let cell_data = cells.cell_verts.into_legacy();
 
-    // create iterator
-    // use peekable to check edge condition
+    // 2. create iterator, use peekable to check edge condition
     let mut data_iter = cell_data.1.iter().copied().peekable();
 
+    // 3. iterate over all cells
     for (cell_idx, cell_type) in cells.types.iter().enumerate() {
         if data_iter.peek().is_none() {
             panic!("Cell type list longer than available data");
@@ -168,10 +169,11 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
         // load indices of vertices of this cell
         let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
 
-        // 记录当前索引列表的长度，用于计算这个单元格生成了多少个三角形
+        // 4. record the length of current index list, for calculating how many triangles this cell generates
+        // use it to check whether the mapping is correct
         let initial_index_count = indices.len();
 
-        // process data according to topology
+        // 5. process data according to topology
         match cell_type {
             // vertex
             model::CellType::Vertex => {
@@ -204,24 +206,24 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
                 }
                 // push indices of this cell to indices list
                 indices.extend(vertices);
-                // 一个三角形一个映射
+                // one triangle, one mapping
                 triangle_to_cell_mapping.push(cell_idx as usize);
             }
 
             model::CellType::Quad => {
-                // 将四边形分解为两个三角形
+                // decompose quad into two triangles
                 if num_vertices != 4 {
                     panic!("Invalid quad vertex count: {} (expected 4)", num_vertices);
                 }
                 indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
                 indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
-                // 两个三角形两个映射
+                // two triangles, two mappings
                 triangle_to_cell_mapping.push(cell_idx as usize);
                 triangle_to_cell_mapping.push(cell_idx as usize);
             }
 
             model::CellType::Tetra => {
-                // 四面体分解为4个三角形
+                // tetrahedron decomposed into 4 triangles
                 if num_vertices != 4 {
                     panic!(
                         "Invalid tetrahedron vertex count: {} (expected 4)",
@@ -232,7 +234,52 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
                 indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
                 indices.extend_from_slice(&[vertices[0], vertices[3], vertices[1]]);
                 indices.extend_from_slice(&[vertices[1], vertices[3], vertices[2]]);
-                // 四个三角形四个映射
+                // 4 triangles, 4 mappings
+                for _ in 0..4 {
+                    triangle_to_cell_mapping.push(cell_idx as usize);
+                }
+            }
+
+            model::CellType::QuadraticEdge => {
+                // 二次边有3个顶点：两个端点和一个中点
+                if num_vertices != 3 {
+                    panic!(
+                        "Invalid quadratic edge vertex count: {} (expected 3)",
+                        num_vertices
+                    );
+                }
+                // 将二次边分解为两个线性边，每个边转换为退化三角形
+                // 第一段：从起点到中点
+                indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
+                // 第二段：从中点到终点
+                indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
+                // 添加两个映射关系
+                triangle_to_cell_mapping.push(cell_idx as usize);
+                triangle_to_cell_mapping.push(cell_idx as usize);
+            }
+
+            model::CellType::QuadraticTriangle => {
+                // 二次三角形有6个顶点：3个角顶点 + 3个边中点
+                if num_vertices != 6 {
+                    panic!(
+                        "Invalid quadratic triangle vertex count: {} (expected 6)",
+                        num_vertices
+                    );
+                }
+                // 顶点布局：vertices[0,1,2] 是角顶点，vertices[3,4,5] 是边中点
+                // 边中点3在边0-1之间，边中点4在边1-2之间，边中点5在边2-0之间
+
+                // 分解为4个线性三角形：
+                // 中心三角形：由3个边中点组成
+                indices.extend_from_slice(&[vertices[3], vertices[4], vertices[5]]);
+                // 角三角形1：角顶点0及其相邻的两个边中点
+                indices.extend_from_slice(&[vertices[0], vertices[3], vertices[5]]);
+                // 角三角形2：角顶点1及其相邻的两个边中点
+                indices.extend_from_slice(&[vertices[1], vertices[4], vertices[3]]);
+                // 角三角形3：角顶点2及其相邻的两个边中点
+                indices.extend_from_slice(&[vertices[2], vertices[5], vertices[4]]);
+
+                // 添加4个映射关系
                 for _ in 0..4 {
                     triangle_to_cell_mapping.push(cell_idx as usize);
                 }
@@ -240,13 +287,13 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
 
             _ => {
                 println!("Unsupported cell type: {:?}", cell_type);
-                // 可以尝试将其他类型也转换为三角形，或者抛出错误
-                // 这里我们添加了通用处理，适用于简单凸多边形
+                // try to convert other types to triangles, or throw an error
+                // here we add a general processing, suitable for simple convex polygons
                 if num_vertices >= 3 {
-                    // 使用扇形三角化算法处理简单凸多边形
+                    // process simple convex polygon using fan triangulation algorithm
                     let fan_indices = triangulate_fan(&vertices);
                     indices.extend(fan_indices);
-                    // 多个三角形多个映射
+                    // multiple triangles, multiple mappings
                     for _ in 0..(vertices.len() - 2) {
                         triangle_to_cell_mapping.push(cell_idx as usize);
                     }
@@ -254,7 +301,7 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
             }
         }
 
-        // 验证是否正确添加了映射
+        // 6. validate whether the mapping is correct
         let triangles_added = (indices.len() - initial_index_count) / 3;
         let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
         if triangles_added != mappings_added {
@@ -262,7 +309,7 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
                 "Warning: Triangle count ({}) does not match mapping count ({})",
                 triangles_added, mappings_added
             );
-            // 补齐映射
+            // fill the mapping
             while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
                 triangle_to_cell_mapping.push(cell_idx as usize);
             }
