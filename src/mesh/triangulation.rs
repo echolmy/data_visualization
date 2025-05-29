@@ -240,46 +240,52 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
                 }
             }
 
+            // quadratic edge
             model::CellType::QuadraticEdge => {
-                // 二次边有3个顶点：两个端点和一个中点
+                // QuadraticEdge has 3 vertices: two endpoints and one midpoint
                 if num_vertices != 3 {
                     panic!(
                         "Invalid quadratic edge vertex count: {} (expected 3)",
                         num_vertices
                     );
                 }
-                // 将二次边分解为两个线性边，每个边转换为退化三角形
-                // 第一段：从起点到中点
+                // decompose quadratic edge into two linear edges, each edge converted to degenerate triangle
+                // first segment: from start to midpoint
                 indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
-                // 第二段：从中点到终点
+                // second segment: from midpoint to end
                 indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
-                // 添加两个映射关系
+                // add two mapping relations
                 triangle_to_cell_mapping.push(cell_idx as usize);
                 triangle_to_cell_mapping.push(cell_idx as usize);
             }
 
+            // quadratic triangle
             model::CellType::QuadraticTriangle => {
-                // 二次三角形有6个顶点：3个角顶点 + 3个边中点
+                // quadratic triangle has 6 vertices: 3 corner vertices + 3 edge midpoints
                 if num_vertices != 6 {
                     panic!(
                         "Invalid quadratic triangle vertex count: {} (expected 6)",
                         num_vertices
                     );
                 }
-                // 顶点布局：vertices[0,1,2] 是角顶点，vertices[3,4,5] 是边中点
-                // 边中点3在边0-1之间，边中点4在边1-2之间，边中点5在边2-0之间
+                // vertex layout:
+                // vertices[0,1,2] are corner vertices,
+                // vertices[3,4,5] are edge midpoints
+                // edge midpoint 3 is between edge 0-1,
+                // edge midpoint 4 is between edge 1-2,
+                // edge midpoint 5 is between edge 2-0
 
-                // 分解为4个线性三角形：
-                // 中心三角形：由3个边中点组成
+                // decompose into 4 linear triangles:
+                // center triangle: composed of 3 edge midpoints
                 indices.extend_from_slice(&[vertices[3], vertices[4], vertices[5]]);
-                // 角三角形1：角顶点0及其相邻的两个边中点
+                // corner triangle 1: corner vertex 0 and its two adjacent edge midpoints
                 indices.extend_from_slice(&[vertices[0], vertices[3], vertices[5]]);
-                // 角三角形2：角顶点1及其相邻的两个边中点
+                // corner triangle 2: corner vertex 1 and its two adjacent edge midpoints
                 indices.extend_from_slice(&[vertices[1], vertices[4], vertices[3]]);
-                // 角三角形3：角顶点2及其相邻的两个边中点
+                // corner triangle 3: corner vertex 2 and its two adjacent edge midpoints
                 indices.extend_from_slice(&[vertices[2], vertices[5], vertices[4]]);
 
-                // 添加4个映射关系
+                // add 4 mapping relations
                 for _ in 0..4 {
                     triangle_to_cell_mapping.push(cell_idx as usize);
                 }
