@@ -1162,12 +1162,12 @@ impl PolyDataExtractor {
 
         // 处理顶点拓扑（跳过，因为它们不形成表面）
         if let Some(_) = piece.verts {
-            println!("发现顶点图元 - 跳过，因为它们不形成表面");
+            println!("find verts - skip, because they don't form a surface");
         }
 
         // 处理线拓扑（跳过，因为它们不形成表面）
         if let Some(_) = piece.lines {
-            println!("发现线图元 - 跳过，因为它们不形成表面");
+            println!("find lines - skip, because they don't form a surface");
         }
 
         // 处理多边形拓扑 - 主要处理逻辑
@@ -1179,12 +1179,14 @@ impl PolyDataExtractor {
 
         // 处理三角形条带（暂不实现）
         if let Some(_strips) = piece.strips {
-            println!("发现三角形条带 - 暂不支持");
+            println!("find strips - not supported");
             // todo!()
         }
 
         if indices.is_empty() {
-            return Err(VtkError::MissingData("片段中未找到表面几何"));
+            return Err(VtkError::MissingData(
+                "No surface geometry found in the fragment",
+            ));
         }
 
         Ok((indices, triangle_to_cell_mapping))
