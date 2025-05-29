@@ -6,3 +6,6 @@ pub struct OpenFileEvent;
 
 #[derive(Event)]
 pub struct LoadModelEvent(pub PathBuf);
+
+#[derive(Event)]
+pub struct ToggleWireframeEvent;
