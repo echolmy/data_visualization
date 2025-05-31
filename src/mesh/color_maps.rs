@@ -19,6 +19,7 @@ impl ColorMap {
     ///
     /// 返回:
     /// * 对应的RGBA颜色
+    #[allow(dead_code)] // 保留用于将来的插值颜色功能
     pub fn get_color(&self, value: f32) -> [f32; 4] {
         let normalized = value.clamp(0.0, 1.0);
         let index = (normalized * (self.colors.len() - 1) as f32).round() as usize;

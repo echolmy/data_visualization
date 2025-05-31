@@ -7,7 +7,6 @@ use rfd::FileDialog;
 use std::path::PathBuf;
 use vtkio; // 添加vtkio导入
 
-// 添加一个新的事件类型，用于在模型加载完成后发送
 #[derive(Event)]
 pub struct ModelLoadedEvent {
     pub position: Vec3,
@@ -115,7 +114,24 @@ fn file_dialog_system(
     }
 }
 
-/// 加载资源文件
+/// 加载并处理3D模型资源文件
+///
+/// # 参数
+/// * `commands` - Bevy命令系统，用于生成实体
+/// * `asset_server` - 资源服务器，用于加载资源
+/// * `meshes` - 网格资源管理器
+/// * `materials` - 材质资源管理器
+/// * `load_events` - 加载模型事件读取器
+/// * `model_loaded_events` - 模型加载完成事件写入器
+/// * `current_model` - 当前模型数据
+/// * `egui_context` - Egui上下文
+/// * `windows` - 窗口查询
+///
+/// # 功能
+/// * 支持加载OBJ和VTK格式的3D模型文件
+/// * 对于OBJ文件，直接通过资源服务器加载
+/// * 对于VTK文件，解析几何数据并创建可渲染的网格
+/// * 更新当前模型状态并发送加载完成事件
 fn load_resource(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -163,7 +179,7 @@ fn load_resource(
             // VTK extension:
             // Legacy: .vtk
             Some("vtk") => {
-                // 首先解析几何数据
+                // 1. 导入VTK文件
                 let vtk = match vtkio::Vtk::import(PathBuf::from(format!(
                     "{}",
                     path.to_string_lossy()
@@ -180,7 +196,12 @@ fn load_resource(
                     }
                 };
 
+                // 打印VTK文件的基本信息
+                mesh::print_vtk_info(&vtk);
+
+                // 2. 解析VTK文件获取几何数据
                 let geometry = match vtk.data {
+                    // 2.1 处理UnstructuredGrid
                     vtkio::model::DataSet::UnstructuredGrid { meta: _, pieces } => {
                         let extractor = mesh::vtk::UnstructuredGridExtractor;
                         match extractor.process_legacy(pieces) {
@@ -191,6 +212,7 @@ fn load_resource(
                             }
                         }
                     }
+                    // 2.2 处理PolyData
                     vtkio::model::DataSet::PolyData { meta: _, pieces } => {
                         let extractor = mesh::vtk::PolyDataExtractor;
                         match extractor.process_legacy(pieces) {
@@ -201,93 +223,91 @@ fn load_resource(
                             }
                         }
                     }
+                    // 2.3 TODO: 支持其他数据类型
                     _ => {
                         println!("Unsupported VTK data type");
                         continue;
                     }
                 };
 
-                // 保存几何数据到CurrentModelData
+                println!(
+                    "Extracted geometry data attributes: {:?}",
+                    &geometry.attributes
+                );
+
+                // 打印几何数据的基本信息
+                mesh::print_geometry_info(&geometry);
+
+                // 3. 保存几何数据到CurrentModelData
                 current_model.geometry = Some(geometry.clone());
                 current_model.is_higher_order = false;
                 current_model.current_order = 1;
 
-                // 现在创建可渲染的网格
-                match mesh::process_vtk_file_legacy(path) {
-                    Ok(mesh) => {
-                        let position = Vec3::new(0.0, 0.5, 0.0);
-                        let scale = Vec3::ONE;
+                // 4. 使用已解析的geometry直接创建可渲染的mesh
+                let mesh = mesh::create_mesh_from_geometry(&geometry);
 
-                        // 计算模型的包围盒
-                        let mut bounds_min = None;
-                        let mut bounds_max = None;
+                let position = Vec3::new(0.0, 0.5, 0.0);
+                let scale = Vec3::ONE;
 
-                        if let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-                            if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) =
-                                positions
-                            {
-                                // 初始化包围盒
-                                if !positions.is_empty() {
-                                    let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-                                    let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+                // 5. 计算模型包围盒
+                let mut bounds_min = None;
+                let mut bounds_max = None;
 
-                                    // 遍历所有顶点，更新包围盒
-                                    for pos in positions {
-                                        let pos_vec = Vec3::new(pos[0], pos[1], pos[2]);
-                                        min = min.min(pos_vec);
-                                        max = max.max(pos_vec);
-                                    }
+                if let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+                    if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) =
+                        positions
+                    {
+                        // 6. 初始化包围盒
+                        if !positions.is_empty() {
+                            let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+                            let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
 
-                                    bounds_min = Some(min);
-                                    bounds_max = Some(max);
-
-                                    println!("Model bounds: min={:?}, max={:?}", min, max);
-                                }
+                            // 7. 遍历所有顶点，更新包围盒
+                            for pos in positions {
+                                let pos_vec = Vec3::new(pos[0], pos[1], pos[2]);
+                                min = min.min(pos_vec);
+                                max = max.max(pos_vec);
                             }
-                        }
 
-                        // 创建实体，移除直接添加的Wireframe组件
-                        commands.spawn((
-                            Mesh3d(meshes.add(mesh.clone())),
-                            MeshMaterial3d(materials.add(StandardMaterial {
-                                base_color: Color::srgb(1.0, 1.0, 1.0),
-                                metallic: 0.0,
-                                perceptual_roughness: 0.5,
-                                reflectance: 0.0,
-                                cull_mode: None,
-                                unlit: true,
-                                alpha_mode: AlphaMode::Opaque,
-                                ..default()
-                            })),
-                            Transform::from_translation(position),
-                            Visibility::Visible,
-                        ));
+                            bounds_min = Some(min);
+                            bounds_max = Some(max);
 
-                        println!("number of vertices: {:?}", mesh.count_vertices());
-
-                        // 发送模型加载完成事件，包含包围盒信息
-                        model_loaded_events.send(ModelLoadedEvent {
-                            position,
-                            scale,
-                            bounds_min,
-                            bounds_max,
-                        });
-                    }
-                    Err(err) => {
-                        println!("load VTK file failed: {:?}", err);
-                        // 显示错误消息到UI
-                        if window_exists {
-                            egui::Window::new("Error").show(egui_context.ctx_mut(), |ui| {
-                                ui.label(format!("load file failed: {:?}", err));
-                            });
+                            println!("Model bounds: min={:?}, max={:?}", min, max);
                         }
                     }
                 }
+
+                // 8. 创建实体
+                commands.spawn((
+                    Mesh3d(meshes.add(mesh.clone())),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(1.0, 1.0, 1.0),
+                        metallic: 0.0,
+                        perceptual_roughness: 0.5,
+                        reflectance: 0.0,
+                        cull_mode: None,
+                        unlit: true,
+                        alpha_mode: AlphaMode::Opaque,
+                        ..default()
+                    })),
+                    Transform::from_translation(position),
+                    Visibility::Visible,
+                ));
+
+                println!("number of vertices: {:?}", mesh.count_vertices());
+
+                // 9. 发送模型加载完成事件，包含包围盒信息
+                model_loaded_events.send(ModelLoadedEvent {
+                    position,
+                    scale,
+                    bounds_min,
+                    bounds_max,
+                });
             }
             // XML: .vtu (非结构网格), .vtp (多边形数据), .vts (结构网格),
             //      .vtr (矩形网格), .vti (图像数据)
             Some("vtu" | "vtp" | "vts" | "vtr" | "vti") => {
-                // 显示暂不支持的消息
+                // 11. show the message that this format is not supported
                 if window_exists {
                     egui::Window::new("Note").show(egui_context.ctx_mut(), |ui| {
                         ui.label("currently not supported this format, developing...");
@@ -296,7 +316,7 @@ fn load_resource(
             }
             _ => {
                 println!("currently not supported other formats, please select another model.");
-                // 显示不支持的消息
+                // 12. show the message that this format is not supported
                 if window_exists {
                     egui::Window::new("Not supported format").show(egui_context.ctx_mut(), |ui| {
                         ui.label(
@@ -316,9 +336,7 @@ fn handle_higher_order_conversion(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut convert_events: EventReader<events::ConvertToHigherOrderEvent>,
     mut current_model: ResMut<CurrentModelData>,
-    mut model_loaded_events: EventWriter<ModelLoadedEvent>,
-    // 查询现有的模型实体以便替换
-    model_entities: Query<Entity, With<Mesh3d>>,
+    mut model_entities: Query<&mut Mesh3d>,
     mut egui_context: EguiContexts,
     windows: Query<&Window>,
 ) {
@@ -328,76 +346,53 @@ fn handle_higher_order_conversion(
         if let Some(ref geometry) = current_model.geometry {
             println!("Converting model to order {} mesh", convert_event.order);
 
-            match mesh::convert_to_higher_order(geometry, convert_event.order) {
+            match mesh::higher_order::convert_to_higher_order(geometry, convert_event.order) {
                 Ok(higher_order_geometry) => {
-                    match mesh::process_higher_order_geometry(higher_order_geometry.clone()) {
-                        Ok(new_mesh) => {
-                            // 删除现有的模型实体
-                            for entity in model_entities.iter() {
-                                commands.entity(entity).despawn();
-                            }
+                    // 使用通用的网格创建函数处理高阶几何数据
+                    let new_mesh = mesh::create_mesh_from_geometry(&higher_order_geometry);
 
-                            let position = Vec3::new(0.0, 0.5, 0.0);
-                            let scale = Vec3::ONE;
+                    // 找到第一个模型实体并更新其mesh
+                    if let Ok(mut mesh3d) = model_entities.get_single_mut() {
+                        *mesh3d = Mesh3d(meshes.add(new_mesh.clone()));
+                        println!(
+                            "Updated existing mesh with {} vertices",
+                            new_mesh.count_vertices()
+                        );
+                    } else {
+                        // 如果没有找到现有实体，则创建新的（降级处理）
+                        let position = Vec3::new(0.0, 0.5, 0.0);
+                        commands.spawn((
+                            Mesh3d(meshes.add(new_mesh.clone())),
+                            MeshMaterial3d(materials.add(StandardMaterial {
+                                base_color: Color::srgb(1.0, 1.0, 1.0),
+                                metallic: 0.0,
+                                perceptual_roughness: 0.5,
+                                reflectance: 0.0,
+                                cull_mode: None,
+                                unlit: true,
+                                alpha_mode: AlphaMode::Opaque,
+                                ..default()
+                            })),
+                            Transform::from_translation(position),
+                            Visibility::Visible,
+                        ));
+                    }
 
-                            // 创建新的模型实体
-                            commands.spawn((
-                                Mesh3d(meshes.add(new_mesh.clone())),
-                                MeshMaterial3d(materials.add(StandardMaterial {
-                                    base_color: Color::srgb(1.0, 1.0, 1.0),
-                                    metallic: 0.0,
-                                    perceptual_roughness: 0.5,
-                                    reflectance: 0.0,
-                                    cull_mode: None,
-                                    unlit: true,
-                                    alpha_mode: AlphaMode::Opaque,
-                                    ..default()
-                                })),
-                                Transform::from_translation(position),
-                                Visibility::Visible,
-                            ));
+                    // 更新当前模型数据
+                    current_model.geometry = Some(higher_order_geometry);
+                    current_model.is_higher_order = true;
+                    current_model.current_order = convert_event.order;
 
-                            println!("Converted mesh vertices: {}", new_mesh.count_vertices());
-
-                            // 更新当前模型数据
-                            current_model.geometry = Some(higher_order_geometry);
-                            current_model.is_higher_order = true;
-                            current_model.current_order = convert_event.order;
-
-                            // 发送模型加载完成事件
-                            model_loaded_events.send(ModelLoadedEvent {
-                                position,
-                                scale,
-                                bounds_min: None, // 这里可以计算新的包围盒
-                                bounds_max: None,
-                            });
-
-                            if window_exists {
-                                egui::Window::new("Conversion Success").show(
-                                    egui_context.ctx_mut(),
-                                    |ui| {
-                                        ui.label(format!(
-                                            "Successfully converted to order {} mesh",
-                                            convert_event.order
-                                        ));
-                                    },
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            println!("Failed to process higher order geometry: {:?}", err);
-                            if window_exists {
-                                egui::Window::new("Conversion Error").show(
-                                    egui_context.ctx_mut(),
-                                    |ui| {
-                                        ui.label(format!(
-                                            "Failed to process higher order geometry: {:?}",
-                                            err
-                                        ));
-                                    },
-                                );
-                            }
-                        }
+                    if window_exists {
+                        egui::Window::new("Conversion Success").show(
+                            egui_context.ctx_mut(),
+                            |ui| {
+                                ui.label(format!(
+                                    "Successfully converted to order {} mesh",
+                                    convert_event.order
+                                ));
+                            },
+                        );
                     }
                 }
                 Err(err) => {
