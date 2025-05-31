@@ -1,3 +1,8 @@
+// 在开发阶段允许未使用的代码和导入
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::utils::HashMap;
@@ -22,7 +27,9 @@ pub enum AttributeType {
         data: Vec<Vec<f32>>,
     },
     Vector(Vec<[f32; 3]>),
-    // Tensor
+    // Tensor - 保留用于将来扩展
+    #[allow(dead_code)]
+    Tensor(Vec<[f32; 9]>), // 3x3张量矩阵
 }
 
 // Position of Attribute
@@ -40,13 +47,17 @@ pub struct GeometryData {
     pub indices: Vec<u32>,
     pub attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
     pub lookup_tables: HashMap<String, Vec<[f32; 4]>>,
-    // normals: Option<Vec<[f32; 3]>>,
+    // normals: Option<Vec<[f32; 3]>>, - 保留用于将来实现法线支持
+    #[allow(dead_code)]
+    normals: Option<Vec<[f32; 3]>>,
     pub triangle_to_cell_mapping: Option<Vec<usize>>,
 }
 
-// 提前定义结构体
 pub struct UnstructuredGridExtractor;
 pub struct PolyDataExtractor;
+pub struct StructuredGridExtractor;
+pub struct RectilinearGridExtractor;
+pub struct StructuredPointsExtractor;
 
 impl GeometryData {
     pub fn new(
@@ -59,6 +70,7 @@ impl GeometryData {
             indices,
             attributes: Some(attributes),
             lookup_tables: HashMap::new(),
+            normals: None,
             triangle_to_cell_mapping: None,
         }
     }
@@ -926,10 +938,6 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
                         lookup_table: Some(colors),
                     },
                 ))
-            }
-            model::ElementType::Generic(desc) => {
-                println!("Generic type: {:?} is not fully supported", desc);
-                Err(VtkError::UnsupportedDataType)
             }
             _ => {
                 println!("Unsupported data type");
