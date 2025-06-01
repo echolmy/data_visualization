@@ -364,7 +364,10 @@ impl GeometryData {
                 } = attr
                 {
                     if location == &AttributeLocation::Point && *num_comp == 1 {
-                        println!("处理点标量属性: {} 查找表: {}", name, table_name);
+                        println!(
+                            "Processing point scalar attribute: {} lookup table: {}",
+                            name, table_name
+                        );
 
                         let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
@@ -374,28 +377,9 @@ impl GeometryData {
                         let range = max_val - min_val;
 
                         println!(
-                            "标量数据范围: min={}, max={}, range={}",
+                            "Scalar data range: min={}, max={}, range={}",
                             min_val, max_val, range
                         );
-
-                        // 首先检查是否有对应的lookup table
-                        let color_lookup = if let Some(lut) = self.lookup_tables.get(table_name) {
-                            println!(
-                                "使用VTK文件中的lookup table: {} (颜色数量: {})",
-                                table_name,
-                                lut.len()
-                            );
-                            lut.clone()
-                        } else {
-                            // 如果没有找到对应的lookup table，使用默认的颜色映射
-                            let color_map = color_maps::get_color_map(table_name);
-                            println!(
-                                "使用默认颜色映射表: {} (颜色数量: {})",
-                                color_map.name,
-                                color_map.colors.len()
-                            );
-                            color_map.colors.to_vec()
-                        };
 
                         // 为每个顶点设置颜色
                         for (i, &val) in data.iter().enumerate() {
@@ -406,29 +390,25 @@ impl GeometryData {
                                     0.5 // 防止除以0
                                 };
 
-                                // 使用lookup table获取颜色
-                                let color_index = if color_lookup.len() > 1 {
-                                    ((normalized * (color_lookup.len() - 1) as f32).round()
-                                        as usize)
-                                        .min(color_lookup.len() - 1)
+                                // 使用ColorMap获取颜色（线性插值）
+                                let color = if let Some(lut) = lookup_table {
+                                    // 创建临时ColorMap进行插值
+                                    let temp_color_map = color_maps::ColorMap {
+                                        name: table_name.clone(),
+                                        colors: lut.clone(),
+                                    };
+                                    temp_color_map.get_interpolated_color(normalized)
                                 } else {
-                                    0
+                                    // 使用默认的颜色映射
+                                    let color_map = color_maps::get_color_map(table_name);
+                                    color_map.get_interpolated_color(normalized)
                                 };
 
-                                // 获取颜色并确保所有值都在有效范围内
-                                let mut color = color_lookup[color_index];
-                                // 确保RGB值在[0.0, 1.0]范围内
-                                for j in 0..3 {
-                                    color[j] = color[j].clamp(0.0, 1.0);
-                                }
-                                // 确保alpha值为1.0（完全不透明）
-                                color[3] = 1.0;
-
-                                // 打印调试信息
+                                // Print debug info
                                 if i < 10 {
-                                    // 只打印前10个顶点的信息，避免输出过多
-                                    println!("顶点 {}: 标量值 = {}, 归一化值 = {:.3}, 颜色索引 = {}, 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
-                                        i, val, normalized, color_index, color[0], color[1], color[2], color[3]);
+                                    // Only print first 10 vertices to avoid too much output
+                                    println!("Vertex {}: scalar value = {}, normalized value = {:.3}, interpolated color = [{:.3}, {:.3}, {:.3}, {:.3}]",
+                                        i, val, normalized, color[0], color[1], color[2], color[3]);
                                 }
 
                                 vertex_colors[i] = color;
@@ -440,7 +420,7 @@ impl GeometryData {
                             Mesh::ATTRIBUTE_COLOR,
                             VertexAttributeValues::from(vertex_colors),
                         );
-                        println!("点标量颜色已插入网格");
+                        println!("Point scalar colors inserted into mesh");
                         return Ok(());
                     }
                 }
@@ -450,19 +430,22 @@ impl GeometryData {
             for ((name, location), attr) in attributes.iter() {
                 if let AttributeType::ColorScalar { nvalues, data } = attr {
                     if location == &AttributeLocation::Cell {
-                        println!("处理单元格颜色标量属性: {} (nvalues: {})", name, nvalues);
-                        println!("颜色数据: {:?}", data);
+                        println!(
+                            "Processing cell color scalar attribute: {} (nvalues: {})",
+                            name, nvalues
+                        );
+                        println!("Color data: {:?}", data);
 
                         let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
                         // 使用映射关系
                         if let Some(mapping) = &self.triangle_to_cell_mapping {
-                            println!("使用三角形到单元格映射");
+                            println!("Using triangle to cell mapping");
                             for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
                                 // 检查cell_idx是否有效
                                 if cell_idx >= data.len() {
                                     println!(
-                                        "警告: 单元格索引 {} 超出颜色数据范围 {}",
+                                        "Warning: cell index {} exceeds color data range {}",
                                         cell_idx,
                                         data.len()
                                     );
@@ -473,7 +456,7 @@ impl GeometryData {
                                 let triangle_base = triangle_idx * 3;
                                 if triangle_base + 2 >= self.indices.len() {
                                     println!(
-                                        "警告: 三角形索引 {} 超出索引范围 {}",
+                                        "Warning: triangle index {} exceeds index range {}",
                                         triangle_base,
                                         self.indices.len()
                                     );
@@ -495,7 +478,7 @@ impl GeometryData {
                                 };
 
                                 println!(
-                                    "三角形 {}, 单元格 {}: 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                    "Triangle {}, Cell {}: color = [{:.2}, {:.2}, {:.2}, {:.2}]",
                                     triangle_idx, cell_idx, color[0], color[1], color[2], color[3]
                                 );
 
@@ -507,13 +490,13 @@ impl GeometryData {
                                 }
                             }
                         } else {
-                            println!("没有三角形到单元格映射，使用默认映射");
+                            println!("No triangle to cell mapping, using default mapping");
                             // 回退到原始方法，按顺序一一对应
                             let num_triangles = self.indices.len() / 3;
                             for triangle_idx in 0..num_triangles {
                                 if triangle_idx >= data.len() {
                                     println!(
-                                        "警告: 三角形索引 {} 超出颜色数据范围 {}",
+                                        "Warning: triangle index {} exceeds color data range {}",
                                         triangle_idx,
                                         data.len()
                                     );
@@ -536,7 +519,7 @@ impl GeometryData {
                                 };
 
                                 println!(
-                                    "三角形 {}: 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
+                                    "Triangle {}: color = [{:.2}, {:.2}, {:.2}, {:.2}]",
                                     triangle_idx, color[0], color[1], color[2], color[3]
                                 );
 
@@ -554,7 +537,7 @@ impl GeometryData {
                             Mesh::ATTRIBUTE_COLOR,
                             VertexAttributeValues::from(vertex_colors),
                         );
-                        println!("单元格颜色标量已插入网格");
+                        println!("Cell color scalar inserted into mesh");
                         return Ok(());
                     }
                 }
@@ -567,7 +550,10 @@ impl GeometryData {
                 } = attr
                 {
                     if location == &AttributeLocation::Cell && *num_comp == 1 {
-                        println!("处理单元格标量属性: {} 查找表: {}", name, table_name);
+                        println!(
+                            "Processing cell scalar attribute: {} lookup table: {}",
+                            name, table_name
+                        );
 
                         let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
@@ -576,28 +562,13 @@ impl GeometryData {
                         let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
                         let range = max_val - min_val;
 
-                        // 检查是否有提供的lookup table
-                        let color_lookup = if let Some(lut) = lookup_table {
-                            println!("使用VTK文件提供的lookup table (颜色数量: {})", lut.len());
-                            lut.clone()
-                        } else {
-                            // 如果没有提供lookup table，使用默认的颜色映射
-                            let color_map = color_maps::get_color_map(table_name);
-                            println!(
-                                "使用默认颜色映射表: {} (颜色数量: {})",
-                                color_map.name,
-                                color_map.colors.len()
-                            );
-                            color_map.colors.to_vec()
-                        };
-
                         // 使用映射关系
                         if let Some(mapping) = &self.triangle_to_cell_mapping {
                             for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
                                 // 检查cell_idx是否有效
                                 if cell_idx >= data.len() {
                                     println!(
-                                        "警告: 单元格索引 {} 超出标量数据范围 {}",
+                                        "Warning: cell index {} exceeds scalar data range {}",
                                         cell_idx,
                                         data.len()
                                     );
@@ -612,22 +583,25 @@ impl GeometryData {
                                     0.5 // 防止除以0
                                 };
 
-                                // 使用lookup table获取颜色
-                                let color_index = if color_lookup.len() > 1 {
-                                    ((normalized * (color_lookup.len() - 1) as f32).round()
-                                        as usize)
-                                        .min(color_lookup.len() - 1)
+                                // 使用ColorMap获取颜色（线性插值）
+                                let color = if let Some(lut) = lookup_table {
+                                    // 创建临时ColorMap进行插值
+                                    let temp_color_map = color_maps::ColorMap {
+                                        name: table_name.clone(),
+                                        colors: lut.clone(),
+                                    };
+                                    temp_color_map.get_interpolated_color(normalized)
                                 } else {
-                                    0
+                                    // 使用默认的颜色映射
+                                    let color_map = color_maps::get_color_map(table_name);
+                                    color_map.get_interpolated_color(normalized)
                                 };
-
-                                let color = color_lookup[color_index];
 
                                 // 获取这个三角形的三个顶点索引
                                 let triangle_base = triangle_idx * 3;
                                 if triangle_base + 2 >= self.indices.len() {
                                     println!(
-                                        "警告: 三角形索引 {} 超出索引范围 {}",
+                                        "Warning: triangle index {} exceeds index range {}",
                                         triangle_base,
                                         self.indices.len()
                                     );
@@ -647,11 +621,11 @@ impl GeometryData {
                                     }
                                 }
 
-                                // 打印调试信息
+                                // Print debug info
                                 if triangle_idx < 10 {
-                                    // 只打印前10个三角形的信息
-                                    println!("三角形 {}, 单元格 {}: 标量值 = {}, 归一化值 = {:.3}, 颜色索引 = {}, 颜色 = [{:.2}, {:.2}, {:.2}, {:.2}]",
-                                        triangle_idx, cell_idx, val, normalized, color_index, color[0], color[1], color[2], color[3]);
+                                    // Only print first 10 triangles to avoid too much output
+                                    println!("Triangle {}, Cell {}: scalar value = {}, normalized value = {:.3}, interpolated color = [{:.3}, {:.3}, {:.3}, {:.3}]",
+                                        triangle_idx, cell_idx, val, normalized, color[0], color[1], color[2], color[3]);
                                 }
                             }
                         }
@@ -661,7 +635,7 @@ impl GeometryData {
                             Mesh::ATTRIBUTE_COLOR,
                             VertexAttributeValues::from(vertex_colors),
                         );
-                        println!("单元格标量颜色已插入网格");
+                        println!("Cell scalar colors inserted into mesh");
                         return Ok(());
                     }
                 }
