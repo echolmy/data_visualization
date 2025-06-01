@@ -103,7 +103,7 @@ fn file_dialog_system(
 ) {
     for _ in open_events.read() {
         if let Some(file) = FileDialog::new()
-            .add_filter("model", &["obj", "glb", "vtk"])
+            .add_filter("model", &["obj", "glb", "vtk", "vtu"])
             .set_directory("/")
             .pick_file()
         {
@@ -178,7 +178,7 @@ fn load_resource(
             }
             // VTK extension:
             // Legacy: .vtk
-            Some("vtk") => {
+            Some("vtk" | "vtu") => {
                 // 1. 导入VTK文件
                 let vtk = match vtkio::Vtk::import(PathBuf::from(format!(
                     "{}",
@@ -304,9 +304,9 @@ fn load_resource(
                     bounds_max,
                 });
             }
-            // XML: .vtu (非结构网格), .vtp (多边形数据), .vts (结构网格),
+            // XML: .vtp (多边形数据), .vts (结构网格),
             //      .vtr (矩形网格), .vti (图像数据)
-            Some("vtu" | "vtp" | "vts" | "vtr" | "vti") => {
+            Some("vtp" | "vts" | "vtr" | "vti") => {
                 // 11. show the message that this format is not supported
                 if window_exists {
                     egui::Window::new("Note").show(egui_context.ctx_mut(), |ui| {

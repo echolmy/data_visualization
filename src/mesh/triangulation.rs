@@ -1,4 +1,4 @@
-use vtkio::model;
+use vtkio::model::{self, VertexNumbers};
 
 /// 通用三角化模块，提供各种几何体的三角化功能
 
@@ -154,181 +154,250 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
     // allocate memory according to triangle initially, if small, it will re-allocate
     let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
     let mut triangle_to_cell_mapping = Vec::new();
-    let cell_data = cells.cell_verts.into_legacy();
 
-    // 2. create iterator, use peekable to check edge condition
-    let mut data_iter = cell_data.1.iter().copied().peekable();
+    // 2. handle different data formats directly
+    // Legacy format
+    match &cells.cell_verts {
+        VertexNumbers::Legacy { .. } => {
+            let (_, data) = cells.cell_verts.into_legacy();
+            let mut data_iter = data.iter().copied().peekable();
 
-    // 3. iterate over all cells
-    for (cell_idx, cell_type) in cells.types.iter().enumerate() {
-        if data_iter.peek().is_none() {
-            panic!("Cell type list longer than available data");
-        }
-        // load the number of each cell (first number of each row of cell)
-        let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
-        // load indices of vertices of this cell
-        let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
-
-        // 4. record the length of current index list, for calculating how many triangles this cell generates
-        // use it to check whether the mapping is correct
-        let initial_index_count = indices.len();
-
-        // 5. process data according to topology
-        match cell_type {
-            // vertex
-            model::CellType::Vertex => {
-                // validate vertex count
-                if num_vertices != 1 {
-                    panic!("Invalid vertex count: {} (expected 1)", num_vertices);
+            // iterate over all cells
+            for (cell_idx, cell_type) in cells.types.iter().enumerate() {
+                if data_iter.peek().is_none() {
+                    panic!("Cell type list longer than available data");
                 }
-                // convert single vertex to degenerate triangle (use same vertex three times)
-                indices.extend_from_slice(&[vertices[0], vertices[0], vertices[0]]);
-                // add mapping relation
-                triangle_to_cell_mapping.push(cell_idx as usize);
-            }
-            // line
-            model::CellType::Line => {
-                if num_vertices != 2 {
-                    panic!("Invalid line vertex count: {} (expected 2)", num_vertices);
-                }
-                // convert line to degenerate triangle (use two same vertices)
-                indices.extend_from_slice(&[vertices[0], vertices[1], vertices[1]]);
-                // add mapping relation
-                triangle_to_cell_mapping.push(cell_idx as usize);
-            }
-            // triangle
-            model::CellType::Triangle => {
-                if num_vertices != 3 {
-                    panic!(
-                        "Invalid triangle vertex count: {} (expected 3)",
-                        num_vertices
-                    );
-                }
-                // push indices of this cell to indices list
-                indices.extend(vertices);
-                // one triangle, one mapping
-                triangle_to_cell_mapping.push(cell_idx as usize);
+                // load the number of each cell (first number of each row of cell)
+                let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
+                // load indices of vertices of this cell
+                let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
+
+                // process the cell
+                process_cell(
+                    &mut indices,
+                    &mut triangle_to_cell_mapping,
+                    cell_idx,
+                    cell_type,
+                    &vertices,
+                );
             }
 
-            model::CellType::Quad => {
-                // decompose quad into two triangles
-                if num_vertices != 4 {
-                    panic!("Invalid quad vertex count: {} (expected 4)", num_vertices);
-                }
-                indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
-                indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
-                // two triangles, two mappings
-                triangle_to_cell_mapping.push(cell_idx as usize);
-                triangle_to_cell_mapping.push(cell_idx as usize);
-            }
-
-            model::CellType::Tetra => {
-                // tetrahedron decomposed into 4 triangles
-                if num_vertices != 4 {
-                    panic!(
-                        "Invalid tetrahedron vertex count: {} (expected 4)",
-                        num_vertices
-                    );
-                }
-                indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
-                indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
-                indices.extend_from_slice(&[vertices[0], vertices[3], vertices[1]]);
-                indices.extend_from_slice(&[vertices[1], vertices[3], vertices[2]]);
-                // 4 triangles, 4 mappings
-                for _ in 0..4 {
-                    triangle_to_cell_mapping.push(cell_idx as usize);
-                }
-            }
-
-            // quadratic edge
-            model::CellType::QuadraticEdge => {
-                // QuadraticEdge has 3 vertices: two endpoints and one midpoint
-                if num_vertices != 3 {
-                    panic!(
-                        "Invalid quadratic edge vertex count: {} (expected 3)",
-                        num_vertices
-                    );
-                }
-                // decompose quadratic edge into two linear edges, each edge converted to degenerate triangle
-                // first segment: from start to midpoint
-                indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
-                // second segment: from midpoint to end
-                indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
-                // add two mapping relations
-                triangle_to_cell_mapping.push(cell_idx as usize);
-                triangle_to_cell_mapping.push(cell_idx as usize);
-            }
-
-            // quadratic triangle
-            model::CellType::QuadraticTriangle => {
-                // quadratic triangle has 6 vertices: 3 corner vertices + 3 edge midpoints
-                if num_vertices != 6 {
-                    panic!(
-                        "Invalid quadratic triangle vertex count: {} (expected 6)",
-                        num_vertices
-                    );
-                }
-                // vertex layout:
-                // vertices[0,1,2] are corner vertices,
-                // vertices[3,4,5] are edge midpoints
-                // edge midpoint 3 is between edge 0-1,
-                // edge midpoint 4 is between edge 1-2,
-                // edge midpoint 5 is between edge 2-0
-
-                // decompose into 4 linear triangles:
-                // center triangle: composed of 3 edge midpoints
-                indices.extend_from_slice(&[vertices[3], vertices[4], vertices[5]]);
-                // corner triangle 1: corner vertex 0 and its two adjacent edge midpoints
-                indices.extend_from_slice(&[vertices[0], vertices[3], vertices[5]]);
-                // corner triangle 2: corner vertex 1 and its two adjacent edge midpoints
-                indices.extend_from_slice(&[vertices[1], vertices[4], vertices[3]]);
-                // corner triangle 3: corner vertex 2 and its two adjacent edge midpoints
-                indices.extend_from_slice(&[vertices[2], vertices[5], vertices[4]]);
-
-                // add 4 mapping relations
-                for _ in 0..4 {
-                    triangle_to_cell_mapping.push(cell_idx as usize);
-                }
-            }
-
-            _ => {
-                println!("Unsupported cell type: {:?}", cell_type);
-                // try to convert other types to triangles, or throw an error
-                // here we add a general processing, suitable for simple convex polygons
-                if num_vertices >= 3 {
-                    // process simple convex polygon using fan triangulation algorithm
-                    let fan_indices = triangulate_fan(&vertices);
-                    indices.extend(fan_indices);
-                    // multiple triangles, multiple mappings
-                    for _ in 0..(vertices.len() - 2) {
-                        triangle_to_cell_mapping.push(cell_idx as usize);
-                    }
-                }
+            // check whether data all consumed
+            if data_iter.next().is_some() {
+                panic!(
+                    "{} bytes of extra data remaining after processing",
+                    data_iter.count() + 1
+                );
             }
         }
+        // XML format
+        VertexNumbers::XML { .. } => {
+            let (connectivity, offsets) = cells.cell_verts.into_xml();
 
-        // 6. validate whether the mapping is correct
-        let triangles_added = (indices.len() - initial_index_count) / 3;
-        let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
-        if triangles_added != mappings_added {
-            println!(
-                "Warning: Triangle count ({}) does not match mapping count ({})",
-                triangles_added, mappings_added
-            );
-            // fill the mapping
-            while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
-                triangle_to_cell_mapping.push(cell_idx as usize);
+            // iterate over all cells using offset array
+            let mut start_idx = 0;
+            for (cell_idx, cell_type) in cells.types.iter().enumerate() {
+                if cell_idx >= offsets.len() {
+                    panic!(
+                        "Cell index {} exceeds offset array length {}",
+                        cell_idx,
+                        offsets.len()
+                    );
+                }
+
+                // get the end index of current cell in connectivity array
+                let end_idx = offsets[cell_idx] as usize;
+
+                // check boundary
+                if end_idx > connectivity.len() {
+                    panic!(
+                        "Offset {} exceeds connectivity array length {}",
+                        end_idx,
+                        connectivity.len()
+                    );
+                }
+
+                // extract the vertex indices of current cell (convert u64 to u32)
+                let vertices: Vec<u32> = connectivity[start_idx..end_idx]
+                    .iter()
+                    .map(|&x| x as u32)
+                    .collect();
+
+                // process the cell
+                process_cell(
+                    &mut indices,
+                    &mut triangle_to_cell_mapping,
+                    cell_idx,
+                    cell_type,
+                    &vertices,
+                );
+
+                // update the start index of next cell
+                start_idx = end_idx;
             }
         }
-    }
-
-    // check whether data all consumed
-    if data_iter.next().is_some() {
-        panic!(
-            "{} bytes of extra data remaining after processing",
-            data_iter.count() + 1
-        );
     }
 
     (indices, triangle_to_cell_mapping)
+}
+
+/// 处理单个单元格的三角化
+fn process_cell(
+    indices: &mut Vec<u32>,
+    triangle_to_cell_mapping: &mut Vec<usize>,
+    cell_idx: usize,
+    cell_type: &model::CellType,
+    vertices: &[u32],
+) {
+    // 4. record the length of current index list, for calculating how many triangles this cell generates
+    // use it to check whether the mapping is correct
+    let initial_index_count = indices.len();
+
+    // 5. process data according to topology
+    match cell_type {
+        // vertex
+        model::CellType::Vertex => {
+            // validate vertex count
+            if vertices.len() != 1 {
+                panic!("Invalid vertex count: {} (expected 1)", vertices.len());
+            }
+            // convert single vertex to degenerate triangle (use same vertex three times)
+            indices.extend_from_slice(&[vertices[0], vertices[0], vertices[0]]);
+            // add mapping relation
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+        // line
+        model::CellType::Line => {
+            if vertices.len() != 2 {
+                panic!("Invalid line vertex count: {} (expected 2)", vertices.len());
+            }
+            // convert line to degenerate triangle (use two same vertices)
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[1]]);
+            // add mapping relation
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+        // triangle
+        model::CellType::Triangle => {
+            if vertices.len() != 3 {
+                panic!(
+                    "Invalid triangle vertex count: {} (expected 3)",
+                    vertices.len()
+                );
+            }
+            // push indices of this cell to indices list
+            indices.extend(vertices);
+            // one triangle, one mapping
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+
+        model::CellType::Quad => {
+            // decompose quad into two triangles
+            if vertices.len() != 4 {
+                panic!("Invalid quad vertex count: {} (expected 4)", vertices.len());
+            }
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
+            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
+            // two triangles, two mappings
+            triangle_to_cell_mapping.push(cell_idx);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+
+        model::CellType::Tetra => {
+            // tetrahedron decomposed into 4 triangles
+            if vertices.len() != 4 {
+                panic!(
+                    "Invalid tetrahedron vertex count: {} (expected 4)",
+                    vertices.len()
+                );
+            }
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
+            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
+            indices.extend_from_slice(&[vertices[0], vertices[3], vertices[1]]);
+            indices.extend_from_slice(&[vertices[1], vertices[3], vertices[2]]);
+            // 4 triangles, 4 mappings
+            for _ in 0..4 {
+                triangle_to_cell_mapping.push(cell_idx);
+            }
+        }
+
+        // quadratic edge
+        model::CellType::QuadraticEdge => {
+            // QuadraticEdge has 3 vertices: two endpoints and one midpoint
+            if vertices.len() != 3 {
+                panic!(
+                    "Invalid quadratic edge vertex count: {} (expected 3)",
+                    vertices.len()
+                );
+            }
+            // decompose quadratic edge into two linear edges, each edge converted to degenerate triangle
+            // first segment: from start to midpoint
+            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
+            // second segment: from midpoint to end
+            indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
+            // add two mapping relations
+            triangle_to_cell_mapping.push(cell_idx);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+
+        // quadratic triangle
+        model::CellType::QuadraticTriangle => {
+            // quadratic triangle has 6 vertices: 3 corner vertices + 3 edge midpoints
+            if vertices.len() != 6 {
+                panic!(
+                    "Invalid quadratic triangle vertex count: {} (expected 6)",
+                    vertices.len()
+                );
+            }
+            // vertex layout:
+            // vertices[0,1,2] are corner vertices,
+            // vertices[3,4,5] are edge midpoints
+            // edge midpoint 3 is between edge 0-1,
+            // edge midpoint 4 is between edge 1-2,
+            // edge midpoint 5 is between edge 2-0
+
+            // decompose into 4 linear triangles:
+            // center triangle: composed of 3 edge midpoints
+            indices.extend_from_slice(&[vertices[3], vertices[4], vertices[5]]);
+            // corner triangle 1: corner vertex 0 and its two adjacent edge midpoints
+            indices.extend_from_slice(&[vertices[0], vertices[3], vertices[5]]);
+            // corner triangle 2: corner vertex 1 and its two adjacent edge midpoints
+            indices.extend_from_slice(&[vertices[1], vertices[4], vertices[3]]);
+            // corner triangle 3: corner vertex 2 and its two adjacent edge midpoints
+            indices.extend_from_slice(&[vertices[2], vertices[5], vertices[4]]);
+
+            // add 4 mapping relations
+            for _ in 0..4 {
+                triangle_to_cell_mapping.push(cell_idx);
+            }
+        }
+
+        _ => {
+            println!("Unsupported cell type: {:?}", cell_type);
+            // try to convert other types to triangles, or throw an error
+            // here we add a general processing, suitable for simple convex polygons
+            if vertices.len() >= 3 {
+                // process simple convex polygon using fan triangulation algorithm
+                let fan_indices = triangulate_fan(vertices);
+                indices.extend(fan_indices);
+                // multiple triangles, multiple mappings
+                for _ in 0..(vertices.len() - 2) {
+                    triangle_to_cell_mapping.push(cell_idx);
+                }
+            }
+        }
+    }
+
+    // 6. validate whether the mapping is correct
+    let triangles_added = (indices.len() - initial_index_count) / 3;
+    let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
+    if triangles_added != mappings_added {
+        println!(
+            "Warning: Triangle count ({}) does not match mapping count ({})",
+            triangles_added, mappings_added
+        );
+        // fill the mapping
+        while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+    }
 }
