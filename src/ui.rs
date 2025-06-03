@@ -19,8 +19,6 @@ pub struct ModelLoadedEvent {
 #[derive(Resource, Default)]
 pub struct CurrentModelData {
     pub geometry: Option<mesh::vtk::GeometryData>,
-    pub is_higher_order: bool,
-    pub current_order: u32,
 }
 
 pub struct UIPlugin;
@@ -29,7 +27,7 @@ impl Plugin for UIPlugin {
         app.add_event::<events::OpenFileEvent>()
             .add_event::<events::LoadModelEvent>()
             .add_event::<events::ToggleWireframeEvent>() // 注册线框切换事件
-            .add_event::<events::ConvertToHigherOrderEvent>() // 注册高阶转换事件
+            .add_event::<events::SubdivideMeshEvent>() // 注册细分事件
             .add_event::<ModelLoadedEvent>() // 注册新事件
             .init_resource::<CurrentModelData>() // 注册当前模型数据资源
             .add_systems(
@@ -38,7 +36,7 @@ impl Plugin for UIPlugin {
                     initialize_ui_systems,
                     file_dialog_system,
                     load_resource,
-                    handle_higher_order_conversion, // 添加处理转换的系统
+                    handle_subdivision, // 添加处理细分的系统
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -50,8 +48,8 @@ fn initialize_ui_systems(
     mut contexts: EguiContexts,
     mut open_file_events: EventWriter<events::OpenFileEvent>,
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
-    mut convert_events: EventWriter<events::ConvertToHigherOrderEvent>, // 添加转换事件写入器
-    current_model: Res<CurrentModelData>,                               // 添加当前模型数据访问
+    mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
+    current_model: Res<CurrentModelData>,                          // 添加当前模型数据访问
     windows: Query<&Window>,
 ) {
     // 只有在窗口存在时才访问egui上下文
@@ -78,16 +76,13 @@ fn initialize_ui_systems(
 
                 // 添加Mesh菜单
                 egui::menu::menu_button(ui, "Mesh", |ui| {
-                    // 只有在有模型加载且为一阶时才显示转换选项
-                    if current_model.geometry.is_some() && !current_model.is_higher_order {
-                        if ui.button("Convert to Second Order").clicked() {
-                            convert_events.send(events::ConvertToHigherOrderEvent { order: 2 });
+                    // 细分选项 - 只要有模型就可以细分
+                    if current_model.geometry.is_some() {
+                        ui.label("Subdivision:");
+
+                        if ui.button("Subdivide").clicked() {
+                            subdivide_events.send(events::SubdivideMeshEvent);
                         }
-                    } else if current_model.geometry.is_some() && current_model.is_higher_order {
-                        ui.label(format!(
-                            "Current mesh is {} order",
-                            current_model.current_order
-                        ));
                     } else {
                         ui.label("Load a model first");
                     }
@@ -166,8 +161,6 @@ fn load_resource(
                 // 对于OBJ模型，我们无法直接获取包围盒，所以设置为None
                 // OBJ文件不保存几何数据到CurrentModelData
                 current_model.geometry = None;
-                current_model.is_higher_order = false;
-                current_model.current_order = 1;
 
                 model_loaded_events.send(ModelLoadedEvent {
                     position,
@@ -240,8 +233,6 @@ fn load_resource(
 
                 // 3. 保存几何数据到CurrentModelData
                 current_model.geometry = Some(geometry.clone());
-                current_model.is_higher_order = false;
-                current_model.current_order = 1;
 
                 // 4. 使用已解析的geometry直接创建可渲染的mesh
                 let mesh = mesh::create_mesh_from_geometry(&geometry);
@@ -329,12 +320,12 @@ fn load_resource(
     }
 }
 
-/// 处理高阶网格转换事件
-fn handle_higher_order_conversion(
+/// 处理网格细分事件
+fn handle_subdivision(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut convert_events: EventReader<events::ConvertToHigherOrderEvent>,
+    mut subdivide_events: EventReader<events::SubdivideMeshEvent>,
     mut current_model: ResMut<CurrentModelData>,
     mut model_entities: Query<&mut Mesh3d>,
     mut egui_context: EguiContexts,
@@ -342,20 +333,18 @@ fn handle_higher_order_conversion(
 ) {
     let window_exists = windows.iter().next().is_some();
 
-    for convert_event in convert_events.read() {
+    for _subdivide_event in subdivide_events.read() {
         if let Some(ref geometry) = current_model.geometry {
-            println!("Converting model to order {} mesh", convert_event.order);
-
-            match mesh::higher_order::convert_to_higher_order(geometry, convert_event.order) {
-                Ok(higher_order_geometry) => {
-                    // 使用通用的网格创建函数处理高阶几何数据
-                    let new_mesh = mesh::create_mesh_from_geometry(&higher_order_geometry);
+            match mesh::subdivision::subdivide_mesh(geometry) {
+                Ok(subdivided_geometry) => {
+                    // 使用通用的网格创建函数处理细分后的几何数据
+                    let new_mesh = mesh::create_mesh_from_geometry(&subdivided_geometry);
 
                     // 找到第一个模型实体并更新其mesh
                     if let Ok(mut mesh3d) = model_entities.get_single_mut() {
                         *mesh3d = Mesh3d(meshes.add(new_mesh.clone()));
                         println!(
-                            "Updated existing mesh with {} vertices",
+                            "Updated existing mesh, now has {} vertices",
                             new_mesh.count_vertices()
                         );
                     } else {
@@ -378,37 +367,32 @@ fn handle_higher_order_conversion(
                         ));
                     }
 
-                    // 更新当前模型数据
-                    current_model.geometry = Some(higher_order_geometry);
-                    current_model.is_higher_order = true;
-                    current_model.current_order = convert_event.order;
+                    // 更新当前模型数据 - 细分后的网格仍然是线性网格，可以继续细分
+                    current_model.geometry = Some(subdivided_geometry);
 
                     if window_exists {
-                        egui::Window::new("Conversion Success").show(
+                        egui::Window::new("Subdivision Success").show(
                             egui_context.ctx_mut(),
                             |ui| {
-                                ui.label(format!(
-                                    "Successfully converted to order {} mesh",
-                                    convert_event.order
-                                ));
+                                ui.label("Successfully completed one subdivision");
                             },
                         );
                     }
                 }
                 Err(err) => {
-                    println!("Failed to convert to higher order: {:?}", err);
+                    println!("Subdivision failed: {:?}", err);
                     if window_exists {
-                        egui::Window::new("Conversion Error").show(egui_context.ctx_mut(), |ui| {
-                            ui.label(format!("Failed to convert to higher order: {:?}", err));
+                        egui::Window::new("Subdivision Error").show(egui_context.ctx_mut(), |ui| {
+                            ui.label(format!("Subdivision failed: {:?}", err));
                         });
                     }
                 }
             }
         } else {
-            println!("No model loaded to convert");
+            println!("No model loaded for subdivision");
             if window_exists {
                 egui::Window::new("No Model").show(egui_context.ctx_mut(), |ui| {
-                    ui.label("Please load a model first before converting");
+                    ui.label("Please load a model first before subdivision");
                 });
             }
         }
