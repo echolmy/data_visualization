@@ -1,6 +1,6 @@
 use std::fmt;
 pub mod color_maps;
-pub mod higher_order;
+pub mod subdivision;
 pub mod triangulation;
 pub mod vtk;
 use self::vtk::*;

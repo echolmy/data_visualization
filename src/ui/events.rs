@@ -11,12 +11,10 @@ pub struct LoadModelEvent(pub PathBuf);
 pub struct ToggleWireframeEvent;
 
 #[derive(Event)]
-pub struct ConvertToHigherOrderEvent {
-    pub order: u32, // mesh order, 2 for second order, 3 for third order, etc.
-}
+pub struct SubdivideMeshEvent;
 
-impl Default for ConvertToHigherOrderEvent {
+impl Default for SubdivideMeshEvent {
     fn default() -> Self {
-        Self { order: 2 } // default to second order mesh
+        Self
     }
 }
