@@ -55,7 +55,7 @@ impl Default for PlaneWave {
         Self {
             amplitude: 1.0,
             phase: 0.0,
-            k: Vec2::ZERO,
+            k: Vec2::new(0.5, 0.5),
             omega: 1.0,
             time: 0.0,
         }
