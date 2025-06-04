@@ -28,6 +28,7 @@ impl Plugin for UIPlugin {
             .add_event::<events::LoadModelEvent>()
             .add_event::<events::ToggleWireframeEvent>() // 注册线框切换事件
             .add_event::<events::SubdivideMeshEvent>() // 注册细分事件
+            .add_event::<events::GenerateWaveEvent>() // 注册波形生成事件
             .add_event::<ModelLoadedEvent>() // 注册新事件
             .init_resource::<CurrentModelData>() // 注册当前模型数据资源
             .add_systems(
@@ -36,7 +37,8 @@ impl Plugin for UIPlugin {
                     initialize_ui_systems,
                     file_dialog_system,
                     load_resource,
-                    handle_subdivision, // 添加处理细分的系统
+                    handle_subdivision,     // 添加处理细分的系统
+                    handle_wave_generation, // 添加处理波形生成的系统
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -49,6 +51,7 @@ fn initialize_ui_systems(
     mut open_file_events: EventWriter<events::OpenFileEvent>,
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
     mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
+    mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
     current_model: Res<CurrentModelData>,                          // 添加当前模型数据访问
     windows: Query<&Window>,
 ) {
@@ -85,6 +88,14 @@ fn initialize_ui_systems(
                         }
                     } else {
                         ui.label("Load a model first");
+                    }
+
+                    ui.separator();
+
+                    // 波形生成选项
+                    ui.label("Generate:");
+                    if ui.button("Create Wave Surface").clicked() {
+                        wave_events.send(events::GenerateWaveEvent);
                     }
                 });
             });
@@ -395,6 +406,77 @@ fn handle_subdivision(
                     ui.label("Please load a model first before subdivision");
                 });
             }
+        }
+    }
+}
+
+/// 处理波形生成事件
+fn handle_wave_generation(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut wave_events: EventReader<events::GenerateWaveEvent>,
+    mut current_model: ResMut<CurrentModelData>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    use crate::mesh::wave::{generate_wave_surface, PlaneWave};
+
+    let window_exists = windows.iter().next().is_some();
+
+    for _wave_event in wave_events.read() {
+        // 创建默认波形参数
+        let wave = PlaneWave::new(
+            1.0,                 // 振幅
+            0.0,                 // 相位
+            Vec2::new(0.5, 0.3), // 波矢量 (方向和频率)
+            2.0,                 // 角频率
+            0.0,                 // 时间
+        );
+
+        // 生成波形网格
+        let wave_mesh = generate_wave_surface(
+            &wave, 10.0, // 宽度
+            10.0, // 深度
+            50,   // 宽度分辨率
+            50,   // 深度分辨率
+        );
+
+        let position = Vec3::new(0.0, 0.0, 0.0);
+
+        // 创建波形实体
+        commands.spawn((
+            Mesh3d(meshes.add(wave_mesh.clone())),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.2, 0.6, 1.0), // 蓝色，像水一样
+                metallic: 0.1,
+                perceptual_roughness: 0.3,
+                reflectance: 0.8,
+                cull_mode: None,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            })),
+            Transform::from_translation(position),
+            Visibility::Visible,
+        ));
+
+        // 清除当前模型数据，因为这是新生成的波形
+        current_model.geometry = None;
+
+        println!(
+            "Generated wave surface with {} vertices",
+            wave_mesh.count_vertices()
+        );
+
+        if window_exists {
+            egui::Window::new("Wave Generated").show(egui_context.ctx_mut(), |ui| {
+                ui.label("Successfully generated wave surface!");
+                ui.label("Parameters:");
+                ui.label("  • Amplitude: 1.0");
+                ui.label("  • Wave vector: (0.5, 0.3)");
+                ui.label("  • Frequency: 2.0");
+                ui.label("  • Resolution: 50x50");
+            });
         }
     }
 }
