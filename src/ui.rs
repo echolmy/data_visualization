@@ -29,6 +29,7 @@ impl Plugin for UIPlugin {
             .add_event::<events::ToggleWireframeEvent>() // 注册线框切换事件
             .add_event::<events::SubdivideMeshEvent>() // 注册细分事件
             .add_event::<events::GenerateWaveEvent>() // 注册波形生成事件
+            .add_event::<events::GenerateWaveShaderEvent>() // 注册GPU shader波形生成事件
             .add_event::<ModelLoadedEvent>() // 注册新事件
             .init_resource::<CurrentModelData>() // 注册当前模型数据资源
             .add_systems(
@@ -37,8 +38,9 @@ impl Plugin for UIPlugin {
                     initialize_ui_systems,
                     file_dialog_system,
                     load_resource,
-                    handle_subdivision,     // 添加处理细分的系统
-                    handle_wave_generation, // 添加处理波形生成的系统
+                    handle_subdivision,            // 添加处理细分的系统
+                    handle_wave_generation,        // 添加处理波形生成的系统
+                    handle_wave_shader_generation, // 添加处理GPU shader波形生成的系统
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -52,7 +54,8 @@ fn initialize_ui_systems(
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
     mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
     mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
-    current_model: Res<CurrentModelData>,                          // 添加当前模型数据访问
+    mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
+    current_model: Res<CurrentModelData>,                                 // 添加当前模型数据访问
     windows: Query<&Window>,
 ) {
     // 只有在窗口存在时才访问egui上下文
@@ -94,8 +97,12 @@ fn initialize_ui_systems(
 
                     // 波形生成选项
                     ui.label("Generate:");
-                    if ui.button("Create Wave Surface").clicked() {
+                    if ui.button("Create Wave Surface (CPU)").clicked() {
                         wave_events.send(events::GenerateWaveEvent);
+                    }
+
+                    if ui.button("Create Wave Surface (GPU Shader)").clicked() {
+                        wave_shader_events.send(events::GenerateWaveShaderEvent);
                     }
                 });
             });
@@ -426,13 +433,7 @@ fn handle_wave_generation(
 
     for _wave_event in wave_events.read() {
         // 创建默认波形参数
-        let wave = PlaneWave::new(
-            1.0,                 // 振幅
-            0.0,                 // 相位
-            Vec2::new(0.5, 0.3), // 波矢量 (方向和频率)
-            2.0,                 // 角频率
-            0.0,                 // 时间
-        );
+        let wave = PlaneWave::default();
 
         // 生成波形网格
         let wave_mesh = generate_wave_surface(
@@ -475,6 +476,74 @@ fn handle_wave_generation(
                 ui.label("  • Amplitude: 1.0");
                 ui.label("  • Wave vector: (0.5, 0.3)");
                 ui.label("  • Frequency: 2.0");
+                ui.label("  • Resolution: 50x50");
+            });
+        }
+    }
+}
+
+/// 处理GPU Shader波形生成事件
+fn handle_wave_shader_generation(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut wave_materials: ResMut<Assets<crate::render::WaveMaterial>>,
+    mut wave_shader_events: EventReader<events::GenerateWaveShaderEvent>,
+    mut current_model: ResMut<CurrentModelData>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    use crate::render::{create_flat_plane_mesh, WaveMaterial};
+
+    let window_exists = windows.iter().next().is_some();
+
+    for _wave_shader_event in wave_shader_events.read() {
+        // 创建平面网格用于shader变形
+        let plane_mesh = create_flat_plane_mesh(
+            50,                                // 宽度分辨率
+            50,                                // 高度分辨率
+            bevy::math::Vec2::new(10.0, 10.0), // 大小
+        );
+
+        // 创建波浪材质
+        let wave_material = WaveMaterial {
+            amplitude: 1.5,
+            phase: 0.0,
+            wave_vector_x: 0.8,
+            wave_vector_y: 0.6,
+            omega: 3.0,
+            time: 0.0,
+            base_color: bevy::math::Vec3::new(0.2, 0.7, 1.0), // 亮蓝色
+        };
+
+        let position = Vec3::new(5.0, 0.0, 0.0); // 稍微偏移避免重叠
+
+        // 创建使用shader材质的波形实体
+        commands.spawn((
+            Mesh3d(meshes.add(plane_mesh.clone())),
+            crate::WaveMaterial3d(wave_materials.add(wave_material)),
+            Transform::from_translation(position),
+            Visibility::Visible,
+        ));
+
+        // 清除当前模型数据，因为这是新生成的波形
+        current_model.geometry = None;
+
+        println!(
+            "Generated GPU shader wave surface with {} vertices",
+            plane_mesh.count_vertices()
+        );
+
+        if window_exists {
+            egui::Window::new("GPU Wave Generated").show(egui_context.ctx_mut(), |ui| {
+                ui.label("Successfully generated GPU shader wave surface!");
+                ui.label("Features:");
+                ui.label("  • Real-time GPU wave calculation");
+                ui.label("  • Animated wave motion");
+                ui.label("  • Dynamic lighting with normals");
+                ui.label("Parameters:");
+                ui.label("  • Amplitude: 1.5");
+                ui.label("  • Wave vector: (0.8, 0.6)");
+                ui.label("  • Frequency: 3.0");
                 ui.label("  • Resolution: 50x50");
             });
         }
