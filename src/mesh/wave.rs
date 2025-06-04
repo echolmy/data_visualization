@@ -2,6 +2,7 @@
 //!
 //! 这个模块提供了基于 bevy Mesh 的波形网格生成功能，
 //! 支持复杂的几何操作和丰富的属性管理。
+#![allow(unused)]
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
