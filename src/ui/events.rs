@@ -16,6 +16,9 @@ pub struct SubdivideMeshEvent;
 #[derive(Event)]
 pub struct GenerateWaveEvent;
 
+#[derive(Event)]
+pub struct GenerateWaveShaderEvent;
+
 impl Default for SubdivideMeshEvent {
     fn default() -> Self {
         Self
@@ -23,6 +26,12 @@ impl Default for SubdivideMeshEvent {
 }
 
 impl Default for GenerateWaveEvent {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for GenerateWaveShaderEvent {
     fn default() -> Self {
         Self
     }
