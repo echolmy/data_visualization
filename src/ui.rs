@@ -1,12 +1,11 @@
 pub mod events;
 use crate::mesh;
-use crate::mesh::vtk::VtkMeshExtractor; // 添加VtkMeshExtractor trait导入
+use crate::mesh::vtk::VtkMeshExtractor;
 use bevy::prelude::*;
 use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
-use vtkio; // 添加vtkio导入
-
+use vtkio;
 #[derive(Event)]
 pub struct ModelLoadedEvent {
     pub position: Vec3,
@@ -26,21 +25,21 @@ impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<events::OpenFileEvent>()
             .add_event::<events::LoadModelEvent>()
-            .add_event::<events::ToggleWireframeEvent>() // 注册线框切换事件
-            .add_event::<events::SubdivideMeshEvent>() // 注册细分事件
-            .add_event::<events::GenerateWaveEvent>() // 注册波形生成事件
-            .add_event::<events::GenerateWaveShaderEvent>() // 注册GPU shader波形生成事件
-            .add_event::<ModelLoadedEvent>() // 注册新事件
-            .init_resource::<CurrentModelData>() // 注册当前模型数据资源
+            .add_event::<events::ToggleWireframeEvent>() // register toggle wireframe event
+            .add_event::<events::SubdivideMeshEvent>() // register subdivide mesh event
+            .add_event::<events::GenerateWaveEvent>() // register generate wave event
+            .add_event::<events::GenerateWaveShaderEvent>() // register generate wave shader event
+            .add_event::<ModelLoadedEvent>() // register model loaded event
+            .init_resource::<CurrentModelData>() // register current model data resource
             .add_systems(
                 Update,
                 (
                     initialize_ui_systems,
                     file_dialog_system,
                     load_resource,
-                    handle_subdivision,            // 添加处理细分的系统
-                    handle_wave_generation,        // 添加处理波形生成的系统
-                    handle_wave_shader_generation, // 添加处理GPU shader波形生成的系统
+                    handle_subdivision,            // add handle subdivision system
+                    handle_wave_generation,        // add handle wave generation system
+                    handle_wave_shader_generation, // add handle wave shader generation system
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -499,30 +498,29 @@ fn handle_wave_shader_generation(
     for _wave_shader_event in wave_shader_events.read() {
         // 创建平面网格用于shader变形
         let plane_mesh = create_flat_plane_mesh(
-            50,                                // 宽度分辨率
-            50,                                // 高度分辨率
-            bevy::math::Vec2::new(10.0, 10.0), // 大小
+            50,                                // width resolution
+            50,                                // height resolution
+            bevy::math::Vec2::new(10.0, 10.0), // size
         );
 
         // 创建波浪材质
-        let wave_material = WaveMaterial {
-            amplitude: 1.5,
-            phase: 0.0,
-            wave_vector_x: 0.8,
-            wave_vector_y: 0.6,
-            omega: 3.0,
-            time: 0.0,
-            base_color: bevy::math::Vec3::new(0.2, 0.7, 1.0), // 亮蓝色
-        };
+        let wave_material = WaveMaterial::new(
+            1.0,
+            0.0,
+            0.5,
+            0.5,
+            1.0,
+            0.0,
+            bevy::math::Vec3::new(0.2, 0.2, 0.8),
+        );
 
-        let position = Vec3::new(5.0, 0.0, 0.0); // 稍微偏移避免重叠
+        let position = Vec3::new(0.0, 0.0, 0.0); // 放在原点位置
 
         // 创建使用shader材质的波形实体
         commands.spawn((
             Mesh3d(meshes.add(plane_mesh.clone())),
-            crate::WaveMaterial3d(wave_materials.add(wave_material)),
+            MeshMaterial3d(wave_materials.add(wave_material)),
             Transform::from_translation(position),
-            Visibility::Visible,
         ));
 
         // 清除当前模型数据，因为这是新生成的波形
@@ -541,9 +539,9 @@ fn handle_wave_shader_generation(
                 ui.label("  • Animated wave motion");
                 ui.label("  • Dynamic lighting with normals");
                 ui.label("Parameters:");
-                ui.label("  • Amplitude: 1.5");
-                ui.label("  • Wave vector: (0.8, 0.6)");
-                ui.label("  • Frequency: 3.0");
+                ui.label("  • Amplitude: 3.0");
+                ui.label("  • Wave vector: (1.0, 1.0)");
+                ui.label("  • Frequency: 2.0");
                 ui.label("  • Resolution: 50x50");
             });
         }

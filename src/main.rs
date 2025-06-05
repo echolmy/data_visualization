@@ -5,7 +5,7 @@ mod render;
 mod ui;
 
 use bevy::pbr::wireframe::WireframePlugin;
-use bevy::prelude::*;
+use bevy::{pbr::MaterialPlugin, prelude::*};
 use bevy_egui::*;
 use bevy_obj::ObjPlugin;
 use camera::CameraPlugin;
@@ -19,10 +19,7 @@ use ui::UIPlugin;
 pub struct Mesh3d(pub Handle<Mesh>);
 
 #[derive(Component)]
-pub struct MeshMaterial3d(pub Handle<StandardMaterial>);
-
-#[derive(Component)]
-pub struct WaveMaterial3d(pub Handle<render::WaveMaterial>);
+pub struct MeshMaterial3d<M: Material>(pub Handle<M>);
 
 // 用于跟踪是否已经打印过调试信息
 static DEBUG_PRINTED: AtomicBool = AtomicBool::new(false);
