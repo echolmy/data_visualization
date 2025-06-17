@@ -29,6 +29,7 @@ impl Plugin for UIPlugin {
             .add_event::<events::SubdivideMeshEvent>() // register subdivide mesh event
             .add_event::<events::GenerateWaveEvent>() // register generate wave event
             .add_event::<events::GenerateWaveShaderEvent>() // register generate wave shader event
+            .add_event::<events::ClearAllMeshesEvent>() // register clear all meshes event
             .add_event::<ModelLoadedEvent>() // register model loaded event
             .init_resource::<CurrentModelData>() // register current model data resource
             .add_systems(
@@ -40,6 +41,7 @@ impl Plugin for UIPlugin {
                     handle_subdivision,            // add handle subdivision system
                     handle_wave_generation,        // add handle wave generation system
                     handle_wave_shader_generation, // add handle wave shader generation system
+                    handle_clear_all_meshes,       // add handle clear all meshes system
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -49,14 +51,21 @@ impl Plugin for UIPlugin {
 
 fn initialize_ui_systems(
     mut contexts: EguiContexts,
+    keyboard_input: Res<ButtonInput<KeyCode>>, // 添加键盘输入
     mut open_file_events: EventWriter<events::OpenFileEvent>,
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
     mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
     mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
     mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
-    current_model: Res<CurrentModelData>,                                 // 添加当前模型数据访问
+    mut clear_events: EventWriter<events::ClearAllMeshesEvent>, // 添加清除所有mesh事件写入器
+    current_model: Res<CurrentModelData>,                       // 添加当前模型数据访问
     windows: Query<&Window>,
 ) {
+    // 处理键盘快捷键
+    if keyboard_input.just_pressed(KeyCode::Delete) {
+        clear_events.send(events::ClearAllMeshesEvent);
+    }
+
     // 只有在窗口存在时才访问egui上下文
     if windows.iter().next().is_some() {
         egui::TopBottomPanel::top("Menu Bar").show(contexts.ctx_mut(), |ui| {
@@ -76,6 +85,12 @@ fn initialize_ui_systems(
                 egui::menu::menu_button(ui, "View", |ui| {
                     if ui.button("Wireframe").clicked() {
                         wireframe_toggle_events.send(events::ToggleWireframeEvent);
+                    }
+
+                    ui.separator();
+
+                    if ui.button("Clear User Meshes (Delete)").clicked() {
+                        clear_events.send(events::ClearAllMeshesEvent);
                     }
                 });
 
@@ -544,6 +559,50 @@ fn handle_wave_shader_generation(
                 ui.label("  • Frequency: 2.0");
                 ui.label("  • Resolution: 50x50");
             });
+        }
+    }
+}
+
+/// 处理清除所有mesh事件
+fn handle_clear_all_meshes(
+    mut commands: Commands,
+    mut clear_events: EventReader<events::ClearAllMeshesEvent>,
+    // 查询所有有Mesh3d但没有NoWireframe组件的实体（即用户导入的mesh，不包括坐标系和网格）
+    mesh_entities: Query<Entity, (With<Mesh3d>, Without<bevy::pbr::wireframe::NoWireframe>)>,
+    mut current_model: ResMut<CurrentModelData>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    let window_exists = windows.iter().next().is_some();
+
+    for _clear_event in clear_events.read() {
+        let mesh_count = mesh_entities.iter().count();
+
+        if mesh_count > 0 {
+            // 遍历所有用户导入的mesh实体并删除它们（保留坐标系和网格）
+            for entity in mesh_entities.iter() {
+                commands.entity(entity).despawn();
+            }
+
+            // 清除当前模型数据
+            current_model.geometry = None;
+
+            println!("清除了 {} 个用户mesh实体（保留坐标系和网格）", mesh_count);
+
+            if window_exists {
+                egui::Window::new("清除完成").show(egui_context.ctx_mut(), |ui| {
+                    ui.label(format!("成功清除了 {} 个mesh", mesh_count));
+                    ui.label("坐标系和网格已保留");
+                });
+            }
+        } else {
+            println!("场景中没有用户mesh需要清除");
+            if window_exists {
+                egui::Window::new("提示").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("场景中没有用户mesh需要清除");
+                    ui.label("坐标系和网格将保持不变");
+                });
+            }
         }
     }
 }
