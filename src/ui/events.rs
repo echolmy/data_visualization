@@ -13,7 +13,34 @@ pub struct ToggleWireframeEvent;
 #[derive(Event)]
 pub struct SubdivideMeshEvent;
 
+#[derive(Event)]
+pub struct GenerateWaveEvent;
+
+#[derive(Event)]
+pub struct GenerateWaveShaderEvent;
+
+#[derive(Event)]
+pub struct ClearAllMeshesEvent;
+
 impl Default for SubdivideMeshEvent {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for GenerateWaveEvent {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for GenerateWaveShaderEvent {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for ClearAllMeshesEvent {
     fn default() -> Self {
         Self
     }

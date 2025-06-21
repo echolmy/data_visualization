@@ -1,12 +1,11 @@
 pub mod events;
 use crate::mesh;
-use crate::mesh::vtk::VtkMeshExtractor; // 添加VtkMeshExtractor trait导入
+use crate::mesh::vtk::VtkMeshExtractor;
 use bevy::prelude::*;
 use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
-use vtkio; // 添加vtkio导入
-
+use vtkio;
 #[derive(Event)]
 pub struct ModelLoadedEvent {
     pub position: Vec3,
@@ -26,17 +25,23 @@ impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<events::OpenFileEvent>()
             .add_event::<events::LoadModelEvent>()
-            .add_event::<events::ToggleWireframeEvent>() // 注册线框切换事件
-            .add_event::<events::SubdivideMeshEvent>() // 注册细分事件
-            .add_event::<ModelLoadedEvent>() // 注册新事件
-            .init_resource::<CurrentModelData>() // 注册当前模型数据资源
+            .add_event::<events::ToggleWireframeEvent>() // register toggle wireframe event
+            .add_event::<events::SubdivideMeshEvent>() // register subdivide mesh event
+            .add_event::<events::GenerateWaveEvent>() // register generate wave event
+            .add_event::<events::GenerateWaveShaderEvent>() // register generate wave shader event
+            .add_event::<events::ClearAllMeshesEvent>() // register clear all meshes event
+            .add_event::<ModelLoadedEvent>() // register model loaded event
+            .init_resource::<CurrentModelData>() // register current model data resource
             .add_systems(
                 Update,
                 (
                     initialize_ui_systems,
                     file_dialog_system,
                     load_resource,
-                    handle_subdivision, // 添加处理细分的系统
+                    handle_subdivision,            // add handle subdivision system
+                    handle_wave_generation,        // add handle wave generation system
+                    handle_wave_shader_generation, // add handle wave shader generation system
+                    handle_clear_all_meshes,       // add handle clear all meshes system
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -46,12 +51,21 @@ impl Plugin for UIPlugin {
 
 fn initialize_ui_systems(
     mut contexts: EguiContexts,
+    keyboard_input: Res<ButtonInput<KeyCode>>, // 添加键盘输入
     mut open_file_events: EventWriter<events::OpenFileEvent>,
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
     mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
-    current_model: Res<CurrentModelData>,                          // 添加当前模型数据访问
+    mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
+    mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
+    mut clear_events: EventWriter<events::ClearAllMeshesEvent>, // 添加清除所有mesh事件写入器
+    current_model: Res<CurrentModelData>,                       // 添加当前模型数据访问
     windows: Query<&Window>,
 ) {
+    // 处理键盘快捷键
+    if keyboard_input.just_pressed(KeyCode::Delete) {
+        clear_events.send(events::ClearAllMeshesEvent);
+    }
+
     // 只有在窗口存在时才访问egui上下文
     if windows.iter().next().is_some() {
         egui::TopBottomPanel::top("Menu Bar").show(contexts.ctx_mut(), |ui| {
@@ -72,6 +86,12 @@ fn initialize_ui_systems(
                     if ui.button("Wireframe").clicked() {
                         wireframe_toggle_events.send(events::ToggleWireframeEvent);
                     }
+
+                    ui.separator();
+
+                    if ui.button("Clear User Meshes (Delete)").clicked() {
+                        clear_events.send(events::ClearAllMeshesEvent);
+                    }
                 });
 
                 // 添加Mesh菜单
@@ -85,6 +105,18 @@ fn initialize_ui_systems(
                         }
                     } else {
                         ui.label("Load a model first");
+                    }
+
+                    ui.separator();
+
+                    // 波形生成选项
+                    ui.label("Generate:");
+                    if ui.button("Create Wave Surface (CPU)").clicked() {
+                        wave_events.send(events::GenerateWaveEvent);
+                    }
+
+                    if ui.button("Create Wave Surface (GPU Shader)").clicked() {
+                        wave_shader_events.send(events::GenerateWaveShaderEvent);
                     }
                 });
             });
@@ -393,6 +425,182 @@ fn handle_subdivision(
             if window_exists {
                 egui::Window::new("No Model").show(egui_context.ctx_mut(), |ui| {
                     ui.label("Please load a model first before subdivision");
+                });
+            }
+        }
+    }
+}
+
+/// 处理波形生成事件
+fn handle_wave_generation(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut wave_events: EventReader<events::GenerateWaveEvent>,
+    mut current_model: ResMut<CurrentModelData>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    use crate::mesh::wave::{generate_wave_surface, PlaneWave};
+
+    let window_exists = windows.iter().next().is_some();
+
+    for _wave_event in wave_events.read() {
+        // 创建默认波形参数
+        let wave = PlaneWave::default();
+
+        // 生成波形网格
+        let wave_mesh = generate_wave_surface(
+            &wave, 10.0, // 宽度
+            10.0, // 深度
+            50,   // 宽度分辨率
+            50,   // 深度分辨率
+        );
+
+        let position = Vec3::new(0.0, 0.0, 0.0);
+
+        // 创建波形实体
+        commands.spawn((
+            Mesh3d(meshes.add(wave_mesh.clone())),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.2, 0.6, 1.0), // 蓝色，像水一样
+                metallic: 0.1,
+                perceptual_roughness: 0.3,
+                reflectance: 0.8,
+                cull_mode: None,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            })),
+            Transform::from_translation(position),
+            Visibility::Visible,
+        ));
+
+        // 清除当前模型数据，因为这是新生成的波形
+        current_model.geometry = None;
+
+        println!(
+            "Generated wave surface with {} vertices",
+            wave_mesh.count_vertices()
+        );
+
+        if window_exists {
+            egui::Window::new("Wave Generated").show(egui_context.ctx_mut(), |ui| {
+                ui.label("Successfully generated wave surface!");
+                ui.label("Parameters:");
+                ui.label("  • Amplitude: 1.0");
+                ui.label("  • Wave vector: (0.5, 0.3)");
+                ui.label("  • Frequency: 2.0");
+                ui.label("  • Resolution: 50x50");
+            });
+        }
+    }
+}
+
+/// 处理GPU Shader波形生成事件
+fn handle_wave_shader_generation(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut wave_materials: ResMut<Assets<crate::render::WaveMaterial>>,
+    mut wave_shader_events: EventReader<events::GenerateWaveShaderEvent>,
+    mut current_model: ResMut<CurrentModelData>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    use crate::render::{create_flat_plane_mesh, WaveMaterial};
+
+    let window_exists = windows.iter().next().is_some();
+
+    for _wave_shader_event in wave_shader_events.read() {
+        // 创建平面网格用于shader变形
+        let plane_mesh = create_flat_plane_mesh(
+            50,                                // width resolution
+            50,                                // height resolution
+            bevy::math::Vec2::new(10.0, 10.0), // size
+        );
+
+        // 创建波浪材质
+        let wave_material = WaveMaterial::new(
+            1.0,
+            0.0,
+            0.5,
+            0.5,
+            1.0,
+            0.0,
+            bevy::math::Vec3::new(0.2, 0.2, 0.8),
+        );
+
+        let position = Vec3::new(0.0, 0.0, 0.0); // 放在原点位置
+
+        // 创建使用shader材质的波形实体
+        commands.spawn((
+            Mesh3d(meshes.add(plane_mesh.clone())),
+            MeshMaterial3d(wave_materials.add(wave_material)),
+            Transform::from_translation(position),
+        ));
+
+        // 清除当前模型数据，因为这是新生成的波形
+        current_model.geometry = None;
+
+        println!(
+            "Generated GPU shader wave surface with {} vertices",
+            plane_mesh.count_vertices()
+        );
+
+        if window_exists {
+            egui::Window::new("GPU Wave Generated").show(egui_context.ctx_mut(), |ui| {
+                ui.label("Successfully generated GPU shader wave surface!");
+                ui.label("Features:");
+                ui.label("  • Real-time GPU wave calculation");
+                ui.label("  • Animated wave motion");
+                ui.label("  • Dynamic lighting with normals");
+                ui.label("Parameters:");
+                ui.label("  • Amplitude: 3.0");
+                ui.label("  • Wave vector: (1.0, 1.0)");
+                ui.label("  • Frequency: 2.0");
+                ui.label("  • Resolution: 50x50");
+            });
+        }
+    }
+}
+
+/// 处理清除所有mesh事件
+fn handle_clear_all_meshes(
+    mut commands: Commands,
+    mut clear_events: EventReader<events::ClearAllMeshesEvent>,
+    // 查询所有有Mesh3d但没有NoWireframe组件的实体（即用户导入的mesh，不包括坐标系和网格）
+    mesh_entities: Query<Entity, (With<Mesh3d>, Without<bevy::pbr::wireframe::NoWireframe>)>,
+    mut current_model: ResMut<CurrentModelData>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    let window_exists = windows.iter().next().is_some();
+
+    for _clear_event in clear_events.read() {
+        let mesh_count = mesh_entities.iter().count();
+
+        if mesh_count > 0 {
+            // 遍历所有用户导入的mesh实体并删除它们（保留坐标系和网格）
+            for entity in mesh_entities.iter() {
+                commands.entity(entity).despawn();
+            }
+
+            // 清除当前模型数据
+            current_model.geometry = None;
+
+            println!("清除了 {} 个用户mesh实体（保留坐标系和网格）", mesh_count);
+
+            if window_exists {
+                egui::Window::new("清除完成").show(egui_context.ctx_mut(), |ui| {
+                    ui.label(format!("成功清除了 {} 个mesh", mesh_count));
+                    ui.label("坐标系和网格已保留");
+                });
+            }
+        } else {
+            println!("场景中没有用户mesh需要清除");
+            if window_exists {
+                egui::Window::new("提示").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("场景中没有用户mesh需要清除");
+                    ui.label("坐标系和网格将保持不变");
                 });
             }
         }
