@@ -1,66 +1,138 @@
-# Data Visualization
+# 数据可视化工具
 
-A scientific data visualization tool built with Rust and Bevy engine, specifically designed for visualizing 3D scientific data in VTK (Visualization Toolkit) format.
+基于 Rust 和 Bevy 引擎构建的科学数据可视化工具，专门用于三维科学数据的可视化，特别是对 VTK（Visualization Toolkit）格式文件的处理和展示。
 
-## Key Features
+## 核心特性
 
-- **VTK File Support**: Import and parse VTK format files
-- **3D Mesh Rendering**: Visualization of triangulated meshes and various cell topologies
-- **Colored Scalar Data**: Color mesh cells based on scalar data
-- **Wireframe Mode**: Toggle between solid/wireframe rendering modes
-- **Higher-Order Mesh Conversion**: Convert first-order meshes to higher-order meshes (2nd order)
-- **Interactive Camera**: Support for rotation, panning, zooming and other basic interactions
-- **Modern GUI**: Intuitive user interface based on egui
+### 文件格式支持
+- **VTK 文件格式**：完整支持 VTK Legacy 和 XML 格式文件的导入和解析
+- **OBJ 格式**：支持标准 OBJ 3D 模型文件
+- **多种数据类型**：
+  - 非结构化网格（Unstructured Grid）
+  - 多边形数据（PolyData）
+  - 结构化网格（Structured Grid）
+  - 直角网格（Rectilinear Grid）
+  - 结构化点（Structured Points）
 
-## Main Dependencies
+### 网格处理功能
+- **智能三角化**：自动将复杂多边形和多面体单元转换为三角形
+- **网格细分**：支持三角网格的自适应细分，提供更高的网格密度
+- **属性插值**：在细分过程中正确插值顶点和单元属性数据
 
-- `bevy` (0.15.0) - Game engine framework
-- `bevy_egui` (0.31.1) - GUI integration
-- `vtkio` (0.7.0-rc1) - VTK file format support
-- `rfd` (0.15.0) - File dialogs
+### 可视化渲染
+- **3D 网格渲染**：支持三角化网格和各种单元拓扑的可视化
+- **线框模式**：可在实体和线框渲染模式之间切换（快捷键：Z）
+- **颜色标量映射**：支持基于标量数据的网格着色
+- **多种颜色映射表**：
+  - 默认彩虹色映射
+  - 热力图映射
+  - Viridis 映射
+  - 高分辨率彩虹映射
 
-## Quick Start
+### 动态效果
+- **CPU 波浪生成**：生成数学波浪表面，支持实时参数调整
+- **GPU 着色器波浪**：使用 GPU 着色器实现高性能动态波浪效果
+- **实时动画**：时间驱动的波浪动画效果
 
-1. Clone the project:
+### 交互式相机系统
+- **自由飞行相机**：完整的 3D 相机控制系统
+- **鼠标控制**：
+  - 右键拖拽：旋转视角
+  - 鼠标滚轮：缩放
+  - 左键拖拽：平移视图
+- **键盘控制**：
+  - W/A/S/D：前后左右移动
+  - Q/E：上下移动  
+  - 方向键：备用移动控制
+- **智能对焦**：自动调整相机位置以适应加载的模型
+
+### 用户界面
+- **现代 GUI**：基于 egui 的直观用户界面
+- **菜单系统**：
+  - File 菜单：文件导入和退出
+  - View 菜单：渲染模式切换、清除网格
+  - Mesh 菜单：网格细分、波浪生成
+- **键盘快捷键**：
+  - Delete：清除所有用户导入的网格
+  - Z：切换线框模式
+
+## 主要依赖
+
+- `bevy` (0.15.0) - 现代游戏引擎框架
+- `bevy_egui` (0.31.1) - GUI 集成库
+- `vtkio` (0.7.0-rc1) - VTK 文件格式支持
+- `rfd` (0.15.0) - 跨平台文件对话框
+- `bevy_obj` (0.15.0) - OBJ 文件格式支持
+- `bevy_atmosphere` (0.12.2) - 大气效果渲染
+
+## 快速开始
+
+1. 克隆项目：
 ```bash
 git clone [repository-url]
 cd data_visualization
 ```
 
-2. Build and run:
+2. 构建并运行：
 ```bash
 cargo run
 ```
 
-## Usage
+## 使用方法
 
-1. After launching the application, import VTK files through menu bar `File > Import`
-2. Control camera with mouse:
-   - Left drag: Rotate view
-   - Right drag: Pan view
-   - Mouse wheel: Zoom
-3. Toggle rendering mode through `View > Wireframe`
-4. Convert mesh to higher-order through `Mesh > Convert to Second Order` (if supported)
+### 基本操作
+1. 启动应用程序后，通过菜单栏 `File > Import` 导入 VTK 或 OBJ 文件
+2. 使用鼠标控制相机：
+   - 右键拖拽：旋转视角
+   - 鼠标滚轮：缩放视图
+   - 左键拖拽：平移视图
+3. 通过 `View > Wireframe` 或按 Z 键切换渲染模式
 
-## Project Structure
+### 高级功能
+1. **网格细分**：在 `Mesh > Subdivide` 中对已加载的网格进行细分
+2. **波浪生成**：
+   - `Mesh > Create Wave Surface (CPU)`：生成 CPU 计算的波浪表面
+   - `Mesh > Create Wave Surface (GPU Shader)`：生成 GPU 着色器驱动的波浪表面
+3. **清除网格**：使用 `View > Clear User Meshes` 或按 Delete 键清除所有导入的网格
+
+### 支持的文件格式
+- **VTK 文件**：`.vtk`, `.vtu` - 支持标量属性、颜色属性和向量属性
+- **OBJ 文件**：`.obj` - 标准 3D 模型文件
+
+## 项目结构
 
 ```
 src/
-├── main.rs           # Application entry point
-├── mesh.rs          # Mesh processing and VTK file parsing
-├── ui.rs            # User interface components
-├── camera.rs        # Camera control system
-├── render.rs        # Rendering related functionality
-└── environment.rs   # Environment and lighting setup
+├── main.rs              # 应用程序入口点
+├── mesh/                # 网格处理模块
+│   ├── vtk.rs          # VTK 文件解析和几何数据提取
+│   ├── subdivision.rs   # 网格细分算法
+│   ├── triangulation.rs # 三角化算法
+│   ├── color_maps.rs   # 颜色映射表
+│   └── wave.rs         # 波浪表面生成
+├── ui/                  # 用户界面模块
+│   └── events.rs       # UI 事件系统
+├── camera/              # 相机控制系统
+├── render/              # 渲染功能
+│   └── wave_material.rs # GPU 波浪着色器材质
+└── environment.rs       # 环境和光照设置
 ```
 
-## Development Status
+## 技术特点
 
-The project is currently in development stage. Core functionality has been implemented. Advanced rendering features and support for more data formats will be added in the future.
+- **高性能渲染**：基于 Bevy 引擎的现代渲染管线
+- **内存安全**：Rust 语言的内存安全保证
+- **模块化设计**：清晰的模块结构，易于扩展
+- **跨平台**：支持 Windows、macOS 和 Linux
+- **GPU 加速**：支持 GPU 着色器实现的动态效果
 
-## Building Release Version
+## 开发状态
 
-For optimal performance, build in release mode:
+项目目前处于活跃开发阶段，核心功能已经实现。未来将继续添加更多高级渲染功能和数据格式支持。
+
+## 构建发布版本
+
+为获得最佳性能，请使用发布模式构建：
 
 ```bash
 cargo build --release
