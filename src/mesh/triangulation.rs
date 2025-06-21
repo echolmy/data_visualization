@@ -1,5 +1,51 @@
 use vtkio::model::{self, VertexNumbers};
 
+/// 二阶三角形数据结构
+///
+/// 二阶三角形包含6个控制点：3个角点和3个边中点
+/// 顶点布局：
+/// - vertices[0,1,2]: 三个角顶点
+/// - vertices[3]: 边0-1的中点
+/// - vertices[4]: 边1-2的中点  
+/// - vertices[5]: 边2-0的中点
+///
+/// 对于渲染，只使用角顶点 [0,1,2]
+/// 边中点 [3,4,5] 保留用于后续的细分操作
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct QuadraticTriangle {
+    /// 6个控制点的索引：[v0, v1, v2, m01, m12, m20]
+    pub vertices: [u32; 6],
+}
+
+#[allow(dead_code)]
+impl QuadraticTriangle {
+    /// 创建新的二阶三角形
+    pub fn new(vertices: [u32; 6]) -> Self {
+        Self { vertices }
+    }
+
+    /// 获取角顶点索引（用于渲染）
+    pub fn corner_vertices(&self) -> [u32; 3] {
+        [self.vertices[0], self.vertices[1], self.vertices[2]]
+    }
+
+    /// 获取边中点索引（用于细分）
+    pub fn edge_midpoints(&self) -> [u32; 3] {
+        [self.vertices[3], self.vertices[4], self.vertices[5]]
+    }
+
+    /// 获取所有顶点索引
+    pub fn all_vertices(&self) -> [u32; 6] {
+        self.vertices
+    }
+
+    /// 转换为线性三角形（只使用角顶点）
+    pub fn to_linear_triangle(&self) -> [u32; 3] {
+        self.corner_vertices()
+    }
+}
+
 /// 通用三角化模块，提供各种几何体的三角化功能
 
 /// 扇形三角化算法
@@ -339,7 +385,7 @@ fn process_cell(
             triangle_to_cell_mapping.push(cell_idx);
         }
 
-        // quadratic triangle
+        // quadratic triangle - 只使用角点进行渲染
         model::CellType::QuadraticTriangle => {
             // quadratic triangle has 6 vertices: 3 corner vertices + 3 edge midpoints
             if vertices.len() != 6 {
@@ -348,27 +394,16 @@ fn process_cell(
                     vertices.len()
                 );
             }
+            // 只使用角顶点渲染，不使用中点
             // vertex layout:
-            // vertices[0,1,2] are corner vertices,
-            // vertices[3,4,5] are edge midpoints
-            // edge midpoint 3 is between edge 0-1,
-            // edge midpoint 4 is between edge 1-2,
-            // edge midpoint 5 is between edge 2-0
+            // vertices[0,1,2] are corner vertices (used for rendering)
+            // vertices[3,4,5] are edge midpoints (ignored for rendering)
 
-            // decompose into 4 linear triangles:
-            // center triangle: composed of 3 edge midpoints
-            indices.extend_from_slice(&[vertices[3], vertices[4], vertices[5]]);
-            // corner triangle 1: corner vertex 0 and its two adjacent edge midpoints
-            indices.extend_from_slice(&[vertices[0], vertices[3], vertices[5]]);
-            // corner triangle 2: corner vertex 1 and its two adjacent edge midpoints
-            indices.extend_from_slice(&[vertices[1], vertices[4], vertices[3]]);
-            // corner triangle 3: corner vertex 2 and its two adjacent edge midpoints
-            indices.extend_from_slice(&[vertices[2], vertices[5], vertices[4]]);
+            // 只创建一个线性三角形，使用角顶点
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
 
-            // add 4 mapping relations
-            for _ in 0..4 {
-                triangle_to_cell_mapping.push(cell_idx);
-            }
+            // 一个三角形一个映射
+            triangle_to_cell_mapping.push(cell_idx);
         }
 
         _ => {
