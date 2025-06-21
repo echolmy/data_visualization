@@ -3,6 +3,7 @@ pub mod color_maps;
 pub mod subdivision;
 pub mod triangulation;
 pub mod vtk;
+pub mod wave;
 use self::vtk::*;
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};

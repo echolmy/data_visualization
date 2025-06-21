@@ -1,5 +1,51 @@
 use vtkio::model::{self, VertexNumbers};
 
+/// 二阶三角形数据结构
+///
+/// 二阶三角形包含6个控制点：3个角点和3个边中点
+/// 顶点布局：
+/// - vertices[0,1,2]: 三个角顶点
+/// - vertices[3]: 边0-1的中点
+/// - vertices[4]: 边1-2的中点  
+/// - vertices[5]: 边2-0的中点
+///
+/// 对于渲染，只使用角顶点 [0,1,2]
+/// 边中点 [3,4,5] 保留用于后续的细分操作
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct QuadraticTriangle {
+    /// 6个控制点的索引：[v0, v1, v2, m01, m12, m20]
+    pub vertices: [u32; 6],
+}
+
+#[allow(dead_code)]
+impl QuadraticTriangle {
+    /// 创建新的二阶三角形
+    pub fn new(vertices: [u32; 6]) -> Self {
+        Self { vertices }
+    }
+
+    /// 获取角顶点索引（用于渲染）
+    pub fn corner_vertices(&self) -> [u32; 3] {
+        [self.vertices[0], self.vertices[1], self.vertices[2]]
+    }
+
+    /// 获取边中点索引（用于细分）
+    pub fn edge_midpoints(&self) -> [u32; 3] {
+        [self.vertices[3], self.vertices[4], self.vertices[5]]
+    }
+
+    /// 获取所有顶点索引
+    pub fn all_vertices(&self) -> [u32; 6] {
+        self.vertices
+    }
+
+    /// 转换为线性三角形（只使用角顶点）
+    pub fn to_linear_triangle(&self) -> [u32; 3] {
+        self.corner_vertices()
+    }
+}
+
 /// 通用三角化模块，提供各种几何体的三角化功能
 
 /// 扇形三角化算法
@@ -150,30 +196,72 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
 /// # return value
 /// * (triangle index list, triangle to original cell mapping)
 pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
+    // 检测网格类型
+    let has_quadratic = cells.types.iter().any(|cell_type| {
+        matches!(
+            cell_type,
+            model::CellType::QuadraticTriangle | model::CellType::QuadraticEdge
+        )
+    });
+
+    if has_quadratic {
+        // 如果包含二阶单元格，使用二阶三角化
+        triangulate_quadratic_cells(cells)
+    } else {
+        // 否则使用线性三角化
+        triangulate_linear_cells(cells)
+    }
+}
+
+/// 处理线性网格的三角化
+///
+/// 专门用于处理线性单元格（Triangle, Quad, Tetra等）
+///
+/// # 参数
+/// * `cells` - 单元格数据
+///
+/// # 返回值
+/// * (三角形索引列表, 三角形到原始单元格的映射)
+pub fn triangulate_linear_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
     // 1. initialize parameters
     // allocate memory according to triangle initially, if small, it will re-allocate
     let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
     let mut triangle_to_cell_mapping = Vec::new();
 
     // 2. handle different data formats directly
-    // Legacy format
-    match &cells.cell_verts {
+    match cells.cell_verts {
         VertexNumbers::Legacy { .. } => {
-            let (_, data) = cells.cell_verts.into_legacy();
-            let mut data_iter = data.iter().copied().peekable();
+            let data = cells.cell_verts.into_legacy();
+            let num_cells = data.0;
+
+            // create iterator
+            let mut data_iter = data.1.iter().copied().peekable();
 
             // iterate over all cells
             for (cell_idx, cell_type) in cells.types.iter().enumerate() {
-                if data_iter.peek().is_none() {
-                    panic!("Cell type list longer than available data");
+                if cell_idx >= num_cells as usize {
+                    break;
                 }
-                // load the number of each cell (first number of each row of cell)
-                let num_vertices = data_iter.next().expect("Missing vertex count") as usize;
-                // load indices of vertices of this cell
+
+                if data_iter.peek().is_none() {
+                    break;
+                }
+
+                // get the vertex count of current cell (first value of each cell)
+                let num_vertices = match data_iter.next() {
+                    Some(n) => n as usize,
+                    None => break,
+                };
+
+                // collect vertex indices of this cell
                 let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
 
-                // process the cell
-                process_cell(
+                if vertices.len() != num_vertices {
+                    continue;
+                }
+
+                // process the cell (线性处理)
+                process_linear_cell(
                     &mut indices,
                     &mut triangle_to_cell_mapping,
                     cell_idx,
@@ -181,16 +269,7 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
                     &vertices,
                 );
             }
-
-            // check whether data all consumed
-            if data_iter.next().is_some() {
-                panic!(
-                    "{} bytes of extra data remaining after processing",
-                    data_iter.count() + 1
-                );
-            }
         }
-        // XML format
         VertexNumbers::XML { .. } => {
             let (connectivity, offsets) = cells.cell_verts.into_xml();
 
@@ -223,8 +302,8 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
                     .map(|&x| x as u32)
                     .collect();
 
-                // process the cell
-                process_cell(
+                // process the cell (线性处理)
+                process_linear_cell(
                     &mut indices,
                     &mut triangle_to_cell_mapping,
                     cell_idx,
@@ -241,8 +320,115 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
     (indices, triangle_to_cell_mapping)
 }
 
-/// 处理单个单元格的三角化
-fn process_cell(
+/// 处理二阶网格的三角化
+///
+/// 专门用于处理二阶单元格（QuadraticTriangle, QuadraticEdge等）
+/// 返回线性三角形用于渲染，同时提取二阶三角形数据结构
+///
+/// # 参数
+/// * `cells` - 单元格数据
+///
+/// # 返回值
+/// * (三角形索引列表, 三角形到原始单元格的映射)
+pub fn triangulate_quadratic_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
+    // 1. initialize parameters
+    let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
+    let mut triangle_to_cell_mapping = Vec::new();
+
+    // 2. handle different data formats directly
+    match cells.cell_verts {
+        VertexNumbers::Legacy { .. } => {
+            let data = cells.cell_verts.into_legacy();
+            let num_cells = data.0;
+
+            // create iterator
+            let mut data_iter = data.1.iter().copied().peekable();
+
+            // iterate over all cells
+            for (cell_idx, cell_type) in cells.types.iter().enumerate() {
+                if cell_idx >= num_cells as usize {
+                    break;
+                }
+
+                if data_iter.peek().is_none() {
+                    break;
+                }
+
+                // get the vertex count of current cell (first value of each cell)
+                let num_vertices = match data_iter.next() {
+                    Some(n) => n as usize,
+                    None => break,
+                };
+
+                // collect vertex indices of this cell
+                let vertices: Vec<u32> = data_iter.by_ref().take(num_vertices).collect();
+
+                if vertices.len() != num_vertices {
+                    continue;
+                }
+
+                // process the cell (二阶处理)
+                process_quadratic_cell(
+                    &mut indices,
+                    &mut triangle_to_cell_mapping,
+                    cell_idx,
+                    cell_type,
+                    &vertices,
+                );
+            }
+        }
+        VertexNumbers::XML { .. } => {
+            let (connectivity, offsets) = cells.cell_verts.into_xml();
+
+            // iterate over all cells using offset array
+            let mut start_idx = 0;
+            for (cell_idx, cell_type) in cells.types.iter().enumerate() {
+                if cell_idx >= offsets.len() {
+                    panic!(
+                        "Cell index {} exceeds offset array length {}",
+                        cell_idx,
+                        offsets.len()
+                    );
+                }
+
+                // get the end index of current cell in connectivity array
+                let end_idx = offsets[cell_idx] as usize;
+
+                // check boundary
+                if end_idx > connectivity.len() {
+                    panic!(
+                        "Offset {} exceeds connectivity array length {}",
+                        end_idx,
+                        connectivity.len()
+                    );
+                }
+
+                // extract the vertex indices of current cell (convert u64 to u32)
+                let vertices: Vec<u32> = connectivity[start_idx..end_idx]
+                    .iter()
+                    .map(|&x| x as u32)
+                    .collect();
+
+                // process the cell (二阶处理)
+                process_quadratic_cell(
+                    &mut indices,
+                    &mut triangle_to_cell_mapping,
+                    cell_idx,
+                    cell_type,
+                    &vertices,
+                );
+
+                // update the start index of next cell
+                start_idx = end_idx;
+            }
+        }
+    }
+
+    (indices, triangle_to_cell_mapping)
+}
+
+/// 处理线性单元格的三角化
+fn process_linear_cell(
     indices: &mut Vec<u32>,
     triangle_to_cell_mapping: &mut Vec<usize>,
     cell_idx: usize,
@@ -320,59 +506,16 @@ fn process_cell(
             }
         }
 
-        // quadratic edge
-        model::CellType::QuadraticEdge => {
-            // QuadraticEdge has 3 vertices: two endpoints and one midpoint
-            if vertices.len() != 3 {
-                panic!(
-                    "Invalid quadratic edge vertex count: {} (expected 3)",
-                    vertices.len()
-                );
-            }
-            // decompose quadratic edge into two linear edges, each edge converted to degenerate triangle
-            // first segment: from start to midpoint
-            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
-            // second segment: from midpoint to end
-            indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
-            // add two mapping relations
-            triangle_to_cell_mapping.push(cell_idx);
-            triangle_to_cell_mapping.push(cell_idx);
-        }
-
-        // quadratic triangle
-        model::CellType::QuadraticTriangle => {
-            // quadratic triangle has 6 vertices: 3 corner vertices + 3 edge midpoints
-            if vertices.len() != 6 {
-                panic!(
-                    "Invalid quadratic triangle vertex count: {} (expected 6)",
-                    vertices.len()
-                );
-            }
-            // vertex layout:
-            // vertices[0,1,2] are corner vertices,
-            // vertices[3,4,5] are edge midpoints
-            // edge midpoint 3 is between edge 0-1,
-            // edge midpoint 4 is between edge 1-2,
-            // edge midpoint 5 is between edge 2-0
-
-            // decompose into 4 linear triangles:
-            // center triangle: composed of 3 edge midpoints
-            indices.extend_from_slice(&[vertices[3], vertices[4], vertices[5]]);
-            // corner triangle 1: corner vertex 0 and its two adjacent edge midpoints
-            indices.extend_from_slice(&[vertices[0], vertices[3], vertices[5]]);
-            // corner triangle 2: corner vertex 1 and its two adjacent edge midpoints
-            indices.extend_from_slice(&[vertices[1], vertices[4], vertices[3]]);
-            // corner triangle 3: corner vertex 2 and its two adjacent edge midpoints
-            indices.extend_from_slice(&[vertices[2], vertices[5], vertices[4]]);
-
-            // add 4 mapping relations
-            for _ in 0..4 {
-                triangle_to_cell_mapping.push(cell_idx);
-            }
+        // 二阶单元格在线性处理中被忽略
+        model::CellType::QuadraticEdge | model::CellType::QuadraticTriangle => {
+            println!(
+                "Warning: Quadratic cell type {:?} found in linear processing, skipping",
+                cell_type
+            );
         }
 
         _ => {
-            println!("Unsupported cell type: {:?}", cell_type);
+            println!("Unsupported linear cell type: {:?}", cell_type);
             // try to convert other types to triangles, or throw an error
             // here we add a general processing, suitable for simple convex polygons
             if vertices.len() >= 3 {
@@ -396,6 +539,143 @@ fn process_cell(
             triangles_added, mappings_added
         );
         // fill the mapping
+        while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+    }
+}
+
+/// 处理二阶单元格的三角化
+fn process_quadratic_cell(
+    indices: &mut Vec<u32>,
+    triangle_to_cell_mapping: &mut Vec<usize>,
+    cell_idx: usize,
+    cell_type: &model::CellType,
+    vertices: &[u32],
+) {
+    let initial_index_count = indices.len();
+
+    match cell_type {
+        // quadratic edge
+        model::CellType::QuadraticEdge => {
+            // QuadraticEdge has 3 vertices: two endpoints and one midpoint
+            if vertices.len() != 3 {
+                panic!(
+                    "Invalid quadratic edge vertex count: {} (expected 3)",
+                    vertices.len()
+                );
+            }
+            // decompose quadratic edge into two linear edges, each edge converted to degenerate triangle
+            // first segment: from start to midpoint
+            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
+            // second segment: from midpoint to end
+            indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
+            // add two mapping relations
+            triangle_to_cell_mapping.push(cell_idx);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+
+        // quadratic triangle - 只使用角点进行渲染，同时创建二阶三角形数据结构
+        model::CellType::QuadraticTriangle => {
+            // quadratic triangle has 6 vertices: 3 corner vertices + 3 edge midpoints
+            if vertices.len() != 6 {
+                panic!(
+                    "Invalid quadratic triangle vertex count: {} (expected 6)",
+                    vertices.len()
+                );
+            }
+
+            // 只使用角顶点进行渲染
+            // vertex layout:
+            // vertices[0,1,2] are corner vertices (used for rendering)
+            // vertices[3,4,5] are edge midpoints (stored for subdivision)
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
+            triangle_to_cell_mapping.push(cell_idx);
+
+            // 创建二阶三角形数据结构（保存完整的6个控制点信息）
+            let _quadratic_triangle = QuadraticTriangle::new([
+                vertices[0],
+                vertices[1],
+                vertices[2], // 角顶点
+                vertices[3],
+                vertices[4],
+                vertices[5], // 边中点
+            ]);
+
+            // TODO: 这里可以将二阶三角形存储到某个全局结构中，用于后续细分
+            // 目前只是创建了数据结构但没有存储
+        }
+
+        // 线性单元格在二阶处理中被处理为线性
+        model::CellType::Vertex => {
+            if vertices.len() != 1 {
+                panic!("Invalid vertex count: {} (expected 1)", vertices.len());
+            }
+            indices.extend_from_slice(&[vertices[0], vertices[0], vertices[0]]);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+        model::CellType::Line => {
+            if vertices.len() != 2 {
+                panic!("Invalid line vertex count: {} (expected 2)", vertices.len());
+            }
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[1]]);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+        model::CellType::Triangle => {
+            if vertices.len() != 3 {
+                panic!(
+                    "Invalid triangle vertex count: {} (expected 3)",
+                    vertices.len()
+                );
+            }
+            indices.extend(vertices);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+        model::CellType::Quad => {
+            if vertices.len() != 4 {
+                panic!("Invalid quad vertex count: {} (expected 4)", vertices.len());
+            }
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
+            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
+            triangle_to_cell_mapping.push(cell_idx);
+            triangle_to_cell_mapping.push(cell_idx);
+        }
+        model::CellType::Tetra => {
+            if vertices.len() != 4 {
+                panic!(
+                    "Invalid tetrahedron vertex count: {} (expected 4)",
+                    vertices.len()
+                );
+            }
+            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
+            indices.extend_from_slice(&[vertices[0], vertices[2], vertices[3]]);
+            indices.extend_from_slice(&[vertices[0], vertices[3], vertices[1]]);
+            indices.extend_from_slice(&[vertices[1], vertices[3], vertices[2]]);
+            for _ in 0..4 {
+                triangle_to_cell_mapping.push(cell_idx);
+            }
+        }
+
+        _ => {
+            println!("Unsupported quadratic cell type: {:?}", cell_type);
+            if vertices.len() >= 3 {
+                let fan_indices = triangulate_fan(vertices);
+                indices.extend(fan_indices);
+                for _ in 0..(vertices.len() - 2) {
+                    triangle_to_cell_mapping.push(cell_idx);
+                }
+            }
+        }
+    }
+
+    // validate mapping
+    let triangles_added = (indices.len() - initial_index_count) / 3;
+    let mappings_added = triangle_to_cell_mapping.len() - (initial_index_count / 3);
+    if triangles_added != mappings_added {
+        println!(
+            "Warning: Triangle count ({}) does not match mapping count ({})",
+            triangles_added, mappings_added
+        );
         while (triangle_to_cell_mapping.len() - (initial_index_count / 3)) < triangles_added {
             triangle_to_cell_mapping.push(cell_idx);
         }

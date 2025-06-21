@@ -10,7 +10,6 @@ rfd = "0.15.0"
 bevy_obj = "0.15.0"
 vtkio = "0.7.0-rc1"
 bevy_atmosphere = "0.12.2"
-procedural_modelling = "0.3.0"
 
 
 [profile.dev]

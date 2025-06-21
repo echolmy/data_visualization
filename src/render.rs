@@ -1,14 +1,25 @@
-//! Wireframe Rendering Module
+//! Render Module
 //!
-//! Implements wireframe rendering functionality using the Bevy engine, providing global wireframe mode
-//! toggling and individual entity wireframe control. Supports keyboard shortcuts (Z key) and UI events
-//! to toggle wireframe rendering mode.
+//! Contains all rendering-related functionality:
+//! - Wireframe rendering: Global wireframe mode toggle and individual control
+//! - Wave material: Dynamic wave effects implemented with GPU shaders
 
+// Sub-module declarations
+pub mod wave_material;
+
+// Re-export wave material related items
+pub use wave_material::{animate_wave_shader, create_flat_plane_mesh, WaveMaterial};
+
+/// Wireframe Rendering Functionality
+///
+/// Implements wireframe rendering functionality using the Bevy engine, providing global wireframe mode
+/// toggling and individual entity wireframe control. Supports keyboard shortcuts (Z key) and UI events
+/// to toggle wireframe rendering mode.
 use crate::ui::events::ToggleWireframeEvent;
 use crate::Mesh3d;
 use bevy::{
     color::palettes::css::*,
-    pbr::wireframe::{NoWireframe, WireframeConfig, WireframePlugin},
+    pbr::wireframe::{NoWireframe, WireframeConfig},
     prelude::*,
 };
 
@@ -19,29 +30,7 @@ use bevy::{
 #[derive(Component)]
 pub struct ProcessedForWireframe;
 
-/// Wireframe Rendering Plugin
-///
-/// A Bevy plugin that provides wireframe rendering functionality, including:
-/// - Global wireframe mode configuration
-/// - Default wireframe color settings  
-/// - Wireframe toggle system
-pub struct WireframeRenderPlugin;
-
-impl Plugin for WireframeRenderPlugin {
-    fn build(&self, app: &mut App) {
-        info!("Initialize WireframeRenderPlugin");
-        app.add_plugins(WireframePlugin)
-            .insert_resource(WireframeConfig {
-                // default not enable global wireframe mode
-                global: false,
-                // control the default color of all wireframe
-                default_color: WHITE.into(),
-            })
-            .add_systems(Update, toggle_wireframe);
-    }
-}
-
-/// System for toggling wireframe rendering settings
+/// Toggle wireframe rendering system
 ///
 /// This system handles wireframe mode toggling with the following features:
 /// - Toggle global wireframe mode via Z key press
@@ -54,16 +43,16 @@ impl Plugin for WireframeRenderPlugin {
 /// - `wireframe_toggle_events`: Wireframe toggle event reader for handling UI toggle requests
 /// - `config`: Mutable wireframe configuration resource for modifying global wireframe settings
 /// - `query`: Query for all entities with Mesh3d component for counting and processing
-fn toggle_wireframe(
+pub fn toggle_wireframe(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut wireframe_toggle_events: EventReader<ToggleWireframeEvent>,
     mut config: ResMut<WireframeConfig>,
     query: Query<(Entity, Option<&NoWireframe>, Option<&ProcessedForWireframe>), With<Mesh3d>>,
 ) {
-    // check how many entities can render wireframe
+    // Check how many entities can render wireframes
     let mesh_count = query.iter().count();
 
-    // if it's the first time running, output some information
+    // If it's the first time running, output some information
     static FIRST_RUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
     if FIRST_RUN.swap(false, std::sync::atomic::Ordering::Relaxed) {
         info!(
@@ -72,7 +61,7 @@ fn toggle_wireframe(
         );
     }
 
-    // toggle global wireframe mode by pressing Z key or UI button
+    // Toggle global wireframe mode by pressing Z key or UI button
     let should_toggle = keyboard_input.just_pressed(KeyCode::KeyZ)
         || wireframe_toggle_events.read().next().is_some();
 
@@ -80,7 +69,24 @@ fn toggle_wireframe(
         config.global = !config.global;
         info!(
             "Toggle global wireframe mode: {}",
-            if config.global { "on" } else { "off" }
+            if config.global { "enabled" } else { "disabled" }
         );
+    }
+}
+
+/// Initialize wireframe rendering configuration
+///
+/// Sets up default wireframe rendering configuration, including:
+/// - Default global wireframe mode disabled
+/// - Set default wireframe color to white
+///
+/// # Returns
+/// Returns configured WireframeConfig resource
+pub fn create_wireframe_config() -> WireframeConfig {
+    WireframeConfig {
+        // Default global wireframe mode disabled
+        global: false,
+        // Control the default color of all wireframes
+        default_color: WHITE.into(),
     }
 }
