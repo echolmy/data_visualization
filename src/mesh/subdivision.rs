@@ -15,8 +15,7 @@
 //! let subdivided_geometry = subdivide_mesh(&geometry)?;
 //! ```
 
-use super::vtk::*;
-use super::VtkError;
+use super::{AttributeLocation, AttributeType, GeometryData, VtkError};
 use bevy::utils::HashMap;
 
 // ============================================================================
