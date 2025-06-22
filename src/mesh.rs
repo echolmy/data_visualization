@@ -82,7 +82,6 @@ impl QuadraticEdge {
     }
 }
 
-#[allow(dead_code)]
 impl QuadraticTriangle {
     /// 创建新的二阶三角形
     pub fn new(vertices: [u32; 6]) -> Self {
@@ -100,6 +99,7 @@ impl QuadraticTriangle {
     }
 
     /// 获取所有顶点索引
+    #[allow(dead_code)]
     pub fn all_vertices(&self) -> [u32; 6] {
         self.vertices
     }

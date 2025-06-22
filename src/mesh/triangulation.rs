@@ -389,11 +389,6 @@ fn process_quadratic_triangle(
 ) {
     validate_vertex_count(vertices, 6, "quadratic triangle");
 
-    // 只使用角顶点进行渲染
-    // 顶点布局：vertices[0,1,2]是角顶点（用于渲染），vertices[3,4,5]是边中点（用于细分）
-    indices.extend_from_slice(&[vertices[0], vertices[1], vertices[2]]);
-    triangle_to_cell_mapping.push(cell_idx);
-
     // 创建二阶三角形数据结构（保存完整的6个控制点信息）
     let quadratic_triangle = QuadraticTriangle::new([
         vertices[0],
@@ -403,6 +398,12 @@ fn process_quadratic_triangle(
         vertices[4],
         vertices[5], // 边中点
     ]);
+
+    // 使用便利方法获取角顶点进行渲染
+    // 二阶三角形的渲染只需要角顶点，边中点用于后续细分
+    let linear_triangle = quadratic_triangle.to_linear_triangle();
+    indices.extend_from_slice(&linear_triangle);
+    triangle_to_cell_mapping.push(cell_idx);
 
     // 存储二阶三角形供后续细分使用
     quadratic_triangles.push(quadratic_triangle);
