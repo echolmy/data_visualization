@@ -714,7 +714,8 @@ pub trait VtkMeshExtractor {
 impl UnstructuredGridExtractor {
     // general triangulate cells - 使用通用三角化函数
     fn triangulate_cells(&self, cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
-        triangulation::triangulate_cells(cells)
+        let (indices, mapping, _) = triangulation::triangulate_cells(cells);
+        (indices, mapping)
     }
 }
 
