@@ -17,7 +17,7 @@ pub struct ModelLoadedEvent {
 // 存储当前模型的几何数据
 #[derive(Resource, Default)]
 pub struct CurrentModelData {
-    pub geometry: Option<mesh::vtk::GeometryData>,
+    pub geometry: Option<mesh::GeometryData>,
 }
 
 pub struct UIPlugin;

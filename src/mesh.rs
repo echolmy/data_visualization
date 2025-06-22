@@ -4,11 +4,150 @@ pub mod subdivision;
 pub mod triangulation;
 pub mod vtk;
 pub mod wave;
-use self::vtk::*;
+
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
+use bevy::utils::HashMap;
 use vtkio::*;
+
+// ============================================================================
+// 核心几何数据结构
+// ============================================================================
+
+// AttributeType 和 AttributeLocation 在 vtk.rs 中定义并重新导出
+pub use self::vtk::{AttributeLocation, AttributeType};
+
+/// 二阶三角形数据结构
+///
+/// 二阶三角形包含6个控制点：3个角点和3个边中点
+/// 顶点布局：
+/// - vertices[0,1,2]: 三个角顶点
+/// - vertices[3]: 边0-1的中点
+/// - vertices[4]: 边1-2的中点  
+/// - vertices[5]: 边2-0的中点
+///
+/// 对于渲染，只使用角顶点 [0,1,2]
+/// 边中点 [3,4,5] 保留用于后续的细分操作
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct QuadraticTriangle {
+    /// 6个控制点的索引：[v0, v1, v2, m01, m12, m20]
+    pub vertices: [u32; 6],
+}
+
+#[allow(dead_code)]
+impl QuadraticTriangle {
+    /// 创建新的二阶三角形
+    pub fn new(vertices: [u32; 6]) -> Self {
+        Self { vertices }
+    }
+
+    /// 获取角顶点索引（用于渲染）
+    pub fn corner_vertices(&self) -> [u32; 3] {
+        [self.vertices[0], self.vertices[1], self.vertices[2]]
+    }
+
+    /// 获取边中点索引（用于细分）
+    pub fn edge_midpoints(&self) -> [u32; 3] {
+        [self.vertices[3], self.vertices[4], self.vertices[5]]
+    }
+
+    /// 获取所有顶点索引
+    pub fn all_vertices(&self) -> [u32; 6] {
+        self.vertices
+    }
+
+    /// 转换为线性三角形（只使用角顶点）
+    pub fn to_linear_triangle(&self) -> [u32; 3] {
+        self.corner_vertices()
+    }
+}
+
+/// 核心几何数据结构
+///
+/// 包含网格的所有几何信息和属性数据，支持线性和二阶网格
+#[derive(Clone)]
+pub struct GeometryData {
+    /// 顶点坐标
+    pub vertices: Vec<[f32; 3]>,
+    /// 三角形索引
+    pub indices: Vec<u32>,
+    /// 属性数据
+    pub attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
+    /// 查找表数据
+    pub lookup_tables: HashMap<String, Vec<[f32; 4]>>,
+    /// 法线向量 - 保留用于将来实现法线支持
+    #[allow(dead_code)]
+    normals: Option<Vec<[f32; 3]>>,
+    /// 三角形到原始单元格的映射
+    pub triangle_to_cell_mapping: Option<Vec<usize>>,
+    /// 二阶三角形数据，用于高级细分算法
+    pub quadratic_triangles: Option<Vec<QuadraticTriangle>>,
+}
+
+#[allow(dead_code)]
+impl GeometryData {
+    /// 创建新的几何数据
+    pub fn new(
+        vertices: Vec<[f32; 3]>,
+        indices: Vec<u32>,
+        attributes: HashMap<(String, AttributeLocation), AttributeType>,
+    ) -> Self {
+        Self {
+            vertices,
+            indices,
+            attributes: Some(attributes),
+            lookup_tables: HashMap::new(),
+            normals: None,
+            triangle_to_cell_mapping: None,
+            quadratic_triangles: None,
+        }
+    }
+
+    /// 添加二阶三角形数据
+    pub fn add_quadratic_triangles(mut self, quadratic_triangles: Vec<QuadraticTriangle>) -> Self {
+        self.quadratic_triangles = Some(quadratic_triangles);
+        self
+    }
+
+    /// 添加属性数据
+    pub fn add_attributes(
+        mut self,
+        attributes: HashMap<(String, AttributeLocation), AttributeType>,
+    ) -> Self {
+        self.attributes = Some(attributes);
+        self
+    }
+
+    /// 添加三角形到单元格映射
+    pub fn add_triangle_to_cell_mapping(mut self, mapping: Vec<usize>) -> Self {
+        self.triangle_to_cell_mapping = Some(mapping);
+        self
+    }
+
+    /// 获取属性数据
+    pub fn get_attributes(
+        &self,
+        name: &str,
+        location: AttributeLocation,
+    ) -> Option<&AttributeType> {
+        self.attributes.as_ref()?.get(&(name.to_string(), location))
+    }
+
+    /// 添加查找表
+    pub fn add_lookup_table(&mut self, name: String, colors: Vec<[f32; 4]>) {
+        self.lookup_tables.insert(name, colors);
+    }
+
+    // 查找表相关方法在vtk.rs中实现
+
+    // VTK特定的方法实现在vtk.rs中
+}
+
+// ============================================================================
+// 错误类型定义
+// ============================================================================
 
 /// Error types that can occur during VTK file processing
 ///

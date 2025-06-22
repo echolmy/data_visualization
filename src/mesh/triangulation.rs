@@ -1,50 +1,5 @@
+use super::QuadraticTriangle;
 use vtkio::model::{self, VertexNumbers};
-
-/// 二阶三角形数据结构
-///
-/// 二阶三角形包含6个控制点：3个角点和3个边中点
-/// 顶点布局：
-/// - vertices[0,1,2]: 三个角顶点
-/// - vertices[3]: 边0-1的中点
-/// - vertices[4]: 边1-2的中点  
-/// - vertices[5]: 边2-0的中点
-///
-/// 对于渲染，只使用角顶点 [0,1,2]
-/// 边中点 [3,4,5] 保留用于后续的细分操作
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct QuadraticTriangle {
-    /// 6个控制点的索引：[v0, v1, v2, m01, m12, m20]
-    pub vertices: [u32; 6],
-}
-
-#[allow(dead_code)]
-impl QuadraticTriangle {
-    /// 创建新的二阶三角形
-    pub fn new(vertices: [u32; 6]) -> Self {
-        Self { vertices }
-    }
-
-    /// 获取角顶点索引（用于渲染）
-    pub fn corner_vertices(&self) -> [u32; 3] {
-        [self.vertices[0], self.vertices[1], self.vertices[2]]
-    }
-
-    /// 获取边中点索引（用于细分）
-    pub fn edge_midpoints(&self) -> [u32; 3] {
-        [self.vertices[3], self.vertices[4], self.vertices[5]]
-    }
-
-    /// 获取所有顶点索引
-    pub fn all_vertices(&self) -> [u32; 6] {
-        self.vertices
-    }
-
-    /// 转换为线性三角形（只使用角顶点）
-    pub fn to_linear_triangle(&self) -> [u32; 3] {
-        self.corner_vertices()
-    }
-}
 
 /// 通用三角化模块，提供各种几何体的三角化功能
 

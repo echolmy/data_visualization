@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::utils::HashMap;
 
-use super::VtkError;
+use super::{GeometryData, QuadraticTriangle, VtkError};
 use crate::mesh::color_maps;
 use crate::mesh::triangulation;
 use vtkio::*;
@@ -15,42 +15,27 @@ use vtkio::*;
 // Definition of type of attributes
 #[derive(Debug, Clone)]
 pub enum AttributeType {
-    // String: table name. If not specified, table name should be `default`
+    /// 标量属性 - 包含查找表支持
     Scalar {
         num_comp: usize,
         table_name: String,
         data: Vec<f32>,
         lookup_table: Option<Vec<[f32; 4]>>,
     },
-    ColorScalar {
-        nvalues: u32,
-        data: Vec<Vec<f32>>,
-    },
+    /// 颜色标量属性
+    ColorScalar { nvalues: u32, data: Vec<Vec<f32>> },
+    /// 向量属性
     Vector(Vec<[f32; 3]>),
-    // Tensor - 保留用于将来扩展
+    /// 张量属性 - 保留用于将来扩展
     #[allow(dead_code)]
     Tensor(Vec<[f32; 9]>), // 3x3张量矩阵
 }
 
-// Position of Attribute
+/// VTK 属性位置定义
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AttributeLocation {
-    Point,
-    Cell,
-}
-
-/// VtkDataset:
-/// Structured Points; Structured Grid; Rectilinear Grid; Polygonal Data; Unstructured Grid; Field
-#[derive(Clone)]
-pub struct GeometryData {
-    pub vertices: Vec<[f32; 3]>,
-    pub indices: Vec<u32>,
-    pub attributes: Option<HashMap<(String, AttributeLocation), AttributeType>>,
-    pub lookup_tables: HashMap<String, Vec<[f32; 4]>>,
-    // normals: Option<Vec<[f32; 3]>>, - 保留用于将来实现法线支持
-    #[allow(dead_code)]
-    normals: Option<Vec<[f32; 3]>>,
-    pub triangle_to_cell_mapping: Option<Vec<usize>>,
+    Point, // 点属性
+    Cell,  // 单元格属性
 }
 
 pub struct UnstructuredGridExtractor;
@@ -59,51 +44,9 @@ pub struct StructuredGridExtractor;
 pub struct RectilinearGridExtractor;
 pub struct StructuredPointsExtractor;
 
+// GeometryData 的核心实现在 mesh.rs 中
+// 这里只提供 VTK 格式特定的扩展方法
 impl GeometryData {
-    pub fn new(
-        vertices: Vec<[f32; 3]>,
-        indices: Vec<u32>,
-        attributes: HashMap<(String, AttributeLocation), AttributeType>,
-    ) -> Self {
-        Self {
-            vertices,
-            indices,
-            attributes: Some(attributes),
-            lookup_tables: HashMap::new(),
-            normals: None,
-            triangle_to_cell_mapping: None,
-        }
-    }
-
-    // add attribute data
-    pub fn add_attributes(
-        mut self,
-        attributes: HashMap<(String, AttributeLocation), AttributeType>,
-    ) -> Self {
-        self.attributes = Some(attributes);
-        self
-    }
-
-    // add triangle to cell mapping
-    pub fn add_triangle_to_cell_mapping(mut self, mapping: Vec<usize>) -> Self {
-        self.triangle_to_cell_mapping = Some(mapping);
-        self
-    }
-
-    // get attribute data
-    pub fn get_attributes(
-        &self,
-        name: &str,
-        location: AttributeLocation,
-    ) -> Option<&AttributeType> {
-        self.attributes.as_ref()?.get(&(name.to_string(), location))
-    }
-
-    // add lookup table
-    pub fn add_lookup_table(&mut self, name: String, colors: Vec<[f32; 4]>) {
-        self.lookup_tables.insert(name, colors);
-    }
-
     /// Apply point color scalars to a mesh.
     ///
     /// This function will try to find a `ColorScalar` attribute in the `Point` location,
@@ -712,10 +655,12 @@ pub trait VtkMeshExtractor {
 }
 
 impl UnstructuredGridExtractor {
-    // general triangulate cells - 使用通用三角化函数
-    fn triangulate_cells(&self, cells: model::Cells) -> (Vec<u32>, Vec<usize>) {
-        let (indices, mapping, _) = triangulation::triangulate_cells(cells);
-        (indices, mapping)
+    // general triangulate cells - 使用通用三角化函数，返回二阶三角形数据
+    fn triangulate_cells(
+        &self,
+        cells: model::Cells,
+    ) -> (Vec<u32>, Vec<usize>, Vec<QuadraticTriangle>) {
+        triangulation::triangulate_cells(cells)
     }
 }
 
@@ -766,7 +711,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
 
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
         if let Some(model::Piece::Inline(piece)) = pieces.into_iter().next() {
-            let (indices, _) = self.triangulate_cells(piece.cells);
+            let (indices, _, _) = self.triangulate_cells(piece.cells);
             indices
         } else {
             Vec::new()
@@ -782,12 +727,18 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
         };
 
         let vertices = self.extract_vertices(&piece.points);
-        let (indices, triangle_to_cell_mapping) = self.triangulate_cells(piece.cells.clone()); // 使用clone来避免移动
+        let (indices, triangle_to_cell_mapping, quadratic_triangles) =
+            self.triangulate_cells(piece.cells.clone()); // 使用clone来避免移动
         let attributes = self.extract_attributes_legacy(&pieces)?;
 
         let mut geometry = GeometryData::new(vertices, indices, attributes);
         geometry.extract_lookup_tables(); // 提取lookup tables
         geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
+
+        // 添加二阶三角形数据（如果有的话）
+        if !quadratic_triangles.is_empty() {
+            geometry = geometry.add_quadratic_triangles(quadratic_triangles);
+        }
 
         Ok(geometry)
     }
