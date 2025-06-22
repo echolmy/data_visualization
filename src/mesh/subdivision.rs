@@ -5,8 +5,35 @@
 //! ## 核心功能
 //! - 标准4分细分：每个三角形分成4个小三角形
 //! - 线性插值：边中点使用线性插值计算
-//! - 属性插值：支持标量、向量、张量等属性的线性插值
+//! - 二次插值：使用二次形函数进行精确插值
+//! - 属性插值：支持标量、向量、张量等属性的插值
 //! - 映射维护：保持三角形到单元格的映射关系
+//!
+//! ## 二次形函数插值
+//!
+//! 基于图8-17中定义的二次拉格朗日形函数，本模块实现精确的二次三角形细分：
+//!
+//! ### 参数坐标系统
+//! - p0位于(r=0, s=0) - 角顶点0
+//! - p1位于(r=1, s=0) - 角顶点1  
+//! - p2位于(r=0, s=1) - 角顶点2
+//! - p3位于(r=0.5, s=0) - 边01中点
+//! - p4位于(r=0.5, s=0.5) - 边12中点
+//! - p5位于(r=0, s=0.5) - 边20中点
+//!
+//! ### 形函数定义
+//! - W0 = (1 - r - s)(2(1 - r - s) - 1) - 对应p0
+//! - W1 = r(2r - 1) - 对应p1
+//! - W2 = s(2s - 1) - 对应p2
+//! - W3 = 4r(1 - r - s) - 对应p3
+//! - W4 = 4rs - 对应p4
+//! - W5 = 4s(1 - r - s) - 对应p5
+//!
+//! ### 插值公式
+//! 任意参数坐标(r, s)处的坐标为：
+//! ```
+//! P(r,s) = W0*p0 + W1*p1 + W2*p2 + W3*p3 + W4*p4 + W5*p5
+//! ```
 //!
 //! ## 使用示例
 //!
@@ -15,7 +42,7 @@
 //! let subdivided_geometry = subdivide_mesh(&geometry)?;
 //! ```
 
-use super::{AttributeLocation, AttributeType, GeometryData, VtkError};
+use super::{AttributeLocation, AttributeType, GeometryData, QuadraticTriangle, VtkError};
 use bevy::utils::HashMap;
 
 // ============================================================================
@@ -24,7 +51,7 @@ use bevy::utils::HashMap;
 
 /// 对网格进行细分
 ///
-/// 这是主要的细分接口，支持线性三角网格的细分。
+/// 这是主要的细分接口，支持线性和二次三角网格的细分。
 ///
 /// # 参数
 /// * `geometry` - 要细分的几何数据
@@ -50,9 +77,22 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
         num_triangles
     );
 
-    // 执行标准4分细分
-    let (new_vertices, new_indices, edge_midpoint_map) =
-        smooth_4_subdivision(original_vertices, original_indices)?;
+    // 执行细分操作
+    let (new_vertices, new_indices, edge_midpoint_map, new_quadratic_triangles) =
+        match &geometry.quadratic_triangles {
+            Some(quadratic_triangles) => {
+                println!("网格包含二阶三角形，使用二次形函数插值");
+                // 使用二次形函数插值进行细分
+                quadratic_4_subdivision(original_vertices, original_indices, quadratic_triangles)?
+            }
+            None => {
+                println!("网格不包含二阶三角形，使用线性插值");
+                // 执行标准4分细分，返回空的二次三角形列表
+                let (vertices, indices, edge_map) =
+                    smooth_4_subdivision(original_vertices, original_indices)?;
+                (vertices, indices, edge_map, Vec::new())
+            }
+        };
 
     // 插值属性数据
     let new_attributes = if let Some(attrs) = &geometry.attributes {
@@ -79,6 +119,15 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
     let mut new_geometry = GeometryData::new(new_vertices, new_indices, new_attributes);
     new_geometry.triangle_to_cell_mapping = Some(new_triangle_to_cell_mapping);
 
+    // 如果有新的二次三角形，添加到几何数据中
+    if !new_quadratic_triangles.is_empty() {
+        new_geometry = new_geometry.add_quadratic_triangles(new_quadratic_triangles);
+        println!(
+            "生成了 {} 个二次三角形",
+            new_geometry.quadratic_triangles.as_ref().unwrap().len()
+        );
+    }
+
     println!(
         "细分完成: {} 个顶点, {} 个三角形",
         new_geometry.vertices.len(),
@@ -91,6 +140,353 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
 // ============================================================================
 // 核心细分算法
 // ============================================================================
+
+/// 二次三角形4分细分 - 使用二次形函数插值
+///
+/// 实现基于二次形函数的4分细分算法，每个二次三角形分成4个完整的二次三角形。
+/// 使用二次拉格朗日插值计算新的边中点和面中点，保持曲面的精确度。
+/// 每个子三角形都包含完整的6个控制点，支持进一步的细分。
+///
+/// # 参数
+/// * `vertices` - 原始顶点列表
+/// * `indices` - 原始索引列表（只使用角顶点）
+/// * `quadratic_triangles` - 二次三角形数据（包含完整的6个控制点）
+///
+/// # 返回值
+/// * `Ok((Vec<[f32; 3]>, Vec<u32>, HashMap<(u32, u32), u32>, Vec<QuadraticTriangle>))` - (新顶点列表, 新索引列表, 边中点映射, 新的二次三角形列表)
+/// * `Err(VtkError)` - 如果细分失败，返回错误信息
+///
+/// # 二次形函数
+/// 使用图8-17中定义的6个二次拉格朗日形函数：
+/// - W0 = (1 - r - s)(2(1 - r - s) - 1)
+/// - W1 = r(2r - 1)
+/// - W2 = s(2s - 1)
+/// - W3 = 4r(1 - r - s)
+/// - W4 = 4rs
+/// - W5 = 4s(1 - r - s)
+///
+/// # 细分策略
+/// 每个二次三角形分成4个完整的二次子三角形：
+/// 1. 左上角子三角形：(v0, mid01, mid20) + 相应的边中点
+/// 2. 右下角子三角形：(mid01, v1, mid12) + 相应的边中点  
+/// 3. 左下角子三角形：(mid20, mid12, v2) + 相应的边中点
+/// 4. 中心子三角形：(mid01, mid12, mid20) + 相应的边中点
+fn quadratic_4_subdivision(
+    vertices: &Vec<[f32; 3]>,
+    indices: &Vec<u32>,
+    quadratic_triangles: &Vec<QuadraticTriangle>,
+) -> Result<
+    (
+        Vec<[f32; 3]>,
+        Vec<u32>,
+        HashMap<(u32, u32), u32>,
+        Vec<QuadraticTriangle>,
+    ),
+    VtkError,
+> {
+    let num_triangles = indices.len() / 3;
+    let mut new_vertices = vertices.clone();
+    let mut new_indices = Vec::with_capacity(num_triangles * 4 * 3);
+    let mut edge_midpoints: HashMap<(u32, u32), u32> = HashMap::new();
+    let mut new_quadratic_triangles = Vec::new();
+
+    println!(
+        "二次三角形细分：处理 {} 个二次三角形",
+        quadratic_triangles.len()
+    );
+
+    for (_triangle_idx, quadratic_tri) in quadratic_triangles.iter().enumerate() {
+        // 获取二次三角形的6个控制点
+        let control_points = quadratic_tri.all_vertices();
+        let p0 = vertices[control_points[0] as usize]; // 角顶点0
+        let p1 = vertices[control_points[1] as usize]; // 角顶点1
+        let p2 = vertices[control_points[2] as usize]; // 角顶点2
+        let p3 = vertices[control_points[3] as usize]; // 边01中点
+        let p4 = vertices[control_points[4] as usize]; // 边12中点
+        let p5 = vertices[control_points[5] as usize]; // 边20中点
+
+        // 确保按照逆时针顺序处理二次三角形
+        // 原始二次三角形控制点顺序: [v0, v1, v2, m01, m12, m20]
+
+        // 使用二次形函数计算新的边中点
+        // 主边中点：3个主要边的中点
+        let mid01 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            control_points[0],
+            control_points[1],
+            &[p0, p1, p2, p3, p4, p5],
+            (0.5, 0.0), // 边01中点的参数坐标
+        );
+
+        let mid12 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            control_points[1],
+            control_points[2],
+            &[p0, p1, p2, p3, p4, p5],
+            (0.5, 0.5), // 边12中点的参数坐标
+        );
+
+        let mid20 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            control_points[2],
+            control_points[0],
+            &[p0, p1, p2, p3, p4, p5],
+            (0.0, 0.5), // 边20中点的参数坐标
+        );
+
+        // 计算新边的中点（子三角形之间的边）
+        // mid01 到 v0 的边中点
+        let mid_mid01_v0 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            control_points[0],
+            mid01,
+            &[p0, p1, p2, p3, p4, p5],
+            (0.25, 0.0), // 细分后的边中点
+        );
+
+        // mid01 到 v1 的边中点
+        let mid_mid01_v1 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            mid01,
+            control_points[1],
+            &[p0, p1, p2, p3, p4, p5],
+            (0.75, 0.0), // 细分后的边中点
+        );
+
+        // mid12 到 v1 的边中点
+        let mid_mid12_v1 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            control_points[1],
+            mid12,
+            &[p0, p1, p2, p3, p4, p5],
+            (0.75, 0.25), // 细分后的边中点
+        );
+
+        // mid12 到 v2 的边中点
+        let mid_mid12_v2 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            mid12,
+            control_points[2],
+            &[p0, p1, p2, p3, p4, p5],
+            (0.25, 0.75), // 细分后的边中点
+        );
+
+        // mid20 到 v2 的边中点
+        let mid_mid20_v2 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            control_points[2],
+            mid20,
+            &[p0, p1, p2, p3, p4, p5],
+            (0.0, 0.75), // 细分后的边中点
+        );
+
+        // mid20 到 v0 的边中点
+        let mid_mid20_v0 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            mid20,
+            control_points[0],
+            &[p0, p1, p2, p3, p4, p5],
+            (0.0, 0.25), // 细分后的边中点
+        );
+
+        // 内部连接边的中点
+        let mid_mid01_mid12 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            mid01,
+            mid12,
+            &[p0, p1, p2, p3, p4, p5],
+            (0.5, 0.25), // 内部边中点
+        );
+
+        let mid_mid12_mid20 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            mid12,
+            mid20,
+            &[p0, p1, p2, p3, p4, p5],
+            (0.25, 0.5), // 内部边中点
+        );
+
+        let mid_mid20_mid01 = get_or_create_quadratic_edge_midpoint(
+            &mut edge_midpoints,
+            &mut new_vertices,
+            mid20,
+            mid01,
+            &[p0, p1, p2, p3, p4, p5],
+            (0.25, 0.25), // 内部边中点
+        );
+
+        // 生成4个子三角形的索引（逆时针顺序）
+        // 1. 左上角子三角形：(v0, mid01, mid20)
+        new_indices.extend_from_slice(&[control_points[0], mid01, mid20]);
+        let quad_tri_1 = QuadraticTriangle::new([
+            control_points[0],
+            mid01,
+            mid20, // 角顶点
+            mid_mid01_v0,
+            mid_mid20_mid01,
+            mid_mid20_v0, // 边中点
+        ]);
+        new_quadratic_triangles.push(quad_tri_1);
+
+        // 2. 右下角子三角形：(mid01, v1, mid12)
+        new_indices.extend_from_slice(&[mid01, control_points[1], mid12]);
+        let quad_tri_2 = QuadraticTriangle::new([
+            mid01,
+            control_points[1],
+            mid12, // 角顶点
+            mid_mid01_v1,
+            mid_mid12_v1,
+            mid_mid01_mid12, // 边中点
+        ]);
+        new_quadratic_triangles.push(quad_tri_2);
+
+        // 3. 左下角子三角形：(mid20, mid12, v2)
+        new_indices.extend_from_slice(&[mid20, mid12, control_points[2]]);
+        let quad_tri_3 = QuadraticTriangle::new([
+            mid20,
+            mid12,
+            control_points[2], // 角顶点
+            mid_mid12_mid20,
+            mid_mid12_v2,
+            mid_mid20_v2, // 边中点
+        ]);
+        new_quadratic_triangles.push(quad_tri_3);
+
+        // 4. 中心子三角形：(mid01, mid12, mid20) - 确保逆时针顺序
+        new_indices.extend_from_slice(&[mid01, mid12, mid20]);
+        let quad_tri_4 = QuadraticTriangle::new([
+            mid01,
+            mid12,
+            mid20, // 角顶点
+            mid_mid01_mid12,
+            mid_mid12_mid20,
+            mid_mid20_mid01, // 边中点
+        ]);
+        new_quadratic_triangles.push(quad_tri_4);
+
+        // 生成了4个子二次三角形，按逆时针顺序排列
+    }
+
+    println!(
+        "总共生成了 {} 个新的二次三角形",
+        new_quadratic_triangles.len()
+    );
+
+    Ok((
+        new_vertices,
+        new_indices,
+        edge_midpoints,
+        new_quadratic_triangles,
+    ))
+}
+
+/// 使用二次形函数获取或创建边中点顶点
+///
+/// 此函数使用二次拉格朗日插值计算边中点，而不是简单的线性插值。
+/// 它根据参数坐标中点位置 (r=0.5, s=0 或其他组合) 计算精确的曲面位置。
+///
+/// # 参数
+/// * `edge_midpoints` - 边中点HashMap缓存
+/// * `vertices` - 用于添加新中点的顶点列表的可变引用
+/// * `v0` - 边的第一个顶点索引
+/// * `v1` - 边的第二个顶点索引
+/// * `control_points` - 二次三角形的6个控制点坐标
+/// * `parametric_coords` - 边中点的参数坐标 (r, s)
+///
+/// # 返回值
+/// * `u32` - 中点顶点的索引（已存在或新创建的）
+///
+/// # 二次插值策略
+/// 根据边的类型，使用相应的参数坐标计算中点：
+/// - 边01: (r=0.5, s=0)
+/// - 边12: (r=0.5, s=0.5)
+/// - 边20: (r=0, s=0.5)
+fn get_or_create_quadratic_edge_midpoint(
+    edge_midpoints: &mut HashMap<(u32, u32), u32>,
+    vertices: &mut Vec<[f32; 3]>,
+    v0: u32,
+    v1: u32,
+    control_points: &[[f32; 3]; 6],
+    parametric_coords: (f32, f32),
+) -> u32 {
+    // 确保一致的边顶点排序
+    let edge = if v0 < v1 { (v0, v1) } else { (v1, v0) };
+
+    // 如果中点已存在，直接返回
+    if let Some(&midpoint_idx) = edge_midpoints.get(&edge) {
+        return midpoint_idx;
+    }
+
+    // 使用提供的参数坐标
+    let (r, s) = parametric_coords;
+
+    // 使用二次形函数计算中点坐标
+    let midpoint = quadratic_interpolation(r, s, control_points);
+
+    // 添加新顶点
+    let midpoint_idx = vertices.len() as u32;
+    vertices.push(midpoint);
+
+    // 记录边中点映射
+    edge_midpoints.insert(edge, midpoint_idx);
+
+    midpoint_idx
+}
+
+/// 二次拉格朗日插值函数
+///
+/// 根据参数坐标 (r, s) 和6个控制点，使用二次形函数计算插值点坐标。
+///
+/// # 参数
+/// * `r` - 参数坐标r
+/// * `s` - 参数坐标s
+/// * `control_points` - 6个控制点坐标 [p0, p1, p2, p3, p4, p5]
+///
+/// # 返回值
+/// * `[f32; 3]` - 插值得到的点坐标
+///
+/// # 形函数定义（基于图8-17）
+/// - W0 = (1 - r - s)(2(1 - r - s) - 1) - 对应p0（角顶点）
+/// - W1 = r(2r - 1) - 对应p1（角顶点）
+/// - W2 = s(2s - 1) - 对应p2（角顶点）
+/// - W3 = 4r(1 - r - s) - 对应p3（边01中点）
+/// - W4 = 4rs - 对应p4（边12中点）
+/// - W5 = 4s(1 - r - s) - 对应p5（边20中点）
+fn quadratic_interpolation(r: f32, s: f32, control_points: &[[f32; 3]; 6]) -> [f32; 3] {
+    let t = 1.0 - r - s; // t = 1 - r - s
+
+    // 计算6个二次形函数值
+    let w0 = t * (2.0 * t - 1.0); // W0 = (1-r-s)(2(1-r-s)-1)
+    let w1 = r * (2.0 * r - 1.0); // W1 = r(2r-1)
+    let w2 = s * (2.0 * s - 1.0); // W2 = s(2s-1)
+    let w3 = 4.0 * r * t; // W3 = 4r(1-r-s)
+    let w4 = 4.0 * r * s; // W4 = 4rs
+    let w5 = 4.0 * s * t; // W5 = 4s(1-r-s)
+
+    // 线性组合计算插值点坐标
+    let mut result = [0.0; 3];
+    for i in 0..3 {
+        result[i] = w0 * control_points[0][i]  // p0贡献
+                  + w1 * control_points[1][i]  // p1贡献
+                  + w2 * control_points[2][i]  // p2贡献
+                  + w3 * control_points[3][i]  // p3贡献（边01中点）
+                  + w4 * control_points[4][i]  // p4贡献（边12中点）
+                  + w5 * control_points[5][i]; // p5贡献（边20中点）
+    }
+
+    result
+}
 
 /// 标准4分细分 - 纯线性插值，1->4细分
 ///
