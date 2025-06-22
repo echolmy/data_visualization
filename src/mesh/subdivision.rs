@@ -1,9 +1,10 @@
 //! # 自适应网格细分模块
 //!
-//! 本模块为三角网格提供无限细分能力，支持线性三角形（3个顶点）和二次三角形（6个顶点）。
+//! 本模块为三角网格提供无限细分能力，支持线性三角形（3个顶点）、二次三角形（6个顶点）和二次边（3个顶点）。
 //!
 //! ## 核心功能
 //! - 标准4分细分：每个三角形分成4个小三角形
+//! - 二次边细分：每个二次边分成2个子边
 //! - 线性插值：边中点使用线性插值计算
 //! - 二次插值：使用二次形函数进行精确插值
 //! - 属性插值：支持标量、向量、张量等属性的插值
@@ -35,6 +36,26 @@
 //! P(r,s) = W0*p0 + W1*p1 + W2*p2 + W3*p3 + W4*p4 + W5*p5
 //! ```
 //!
+//! ## 二次边形函数插值
+//!
+//! 基于图8-16中定义的二次边拉格朗日形函数，本模块实现精确的二次边细分：
+//!
+//! ### 参数坐标系统
+//! - p0位于r=0处 - 起始端点
+//! - p1位于r=1处 - 结束端点
+//! - p2位于r=0.5处 - 边中点
+//!
+//! ### 形函数定义
+//! - W0 = 2(r - 0.5)(r - 1) - 对应p0
+//! - W1 = 2r(r - 0.5) - 对应p1
+//! - W2 = 4r(1 - r) - 对应p2
+//!
+//! ### 插值公式
+//! 任意参数坐标r处的坐标为：
+//! ```
+//! P(r) = W0*p0 + W1*p1 + W2*p2
+//! ```
+//!
 //! ## 使用示例
 //!
 //! ```rust
@@ -42,7 +63,9 @@
 //! let subdivided_geometry = subdivide_mesh(&geometry)?;
 //! ```
 
-use super::{AttributeLocation, AttributeType, GeometryData, QuadraticTriangle, VtkError};
+use super::{
+    AttributeLocation, AttributeType, GeometryData, QuadraticEdge, QuadraticTriangle, VtkError,
+};
 use bevy::utils::HashMap;
 
 // ============================================================================
@@ -78,21 +101,57 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
     );
 
     // 执行细分操作
-    let (new_vertices, new_indices, edge_midpoint_map, new_quadratic_triangles) =
-        match &geometry.quadratic_triangles {
-            Some(quadratic_triangles) => {
-                println!("网格包含二阶三角形，使用二次形函数插值");
-                // 使用二次形函数插值进行细分
-                quadratic_4_subdivision(original_vertices, original_indices, quadratic_triangles)?
-            }
-            None => {
-                println!("网格不包含二阶三角形，使用线性插值");
-                // 执行标准4分细分，返回空的二次三角形列表
-                let (vertices, indices, edge_map) =
-                    smooth_4_subdivision(original_vertices, original_indices)?;
-                (vertices, indices, edge_map, Vec::new())
-            }
-        };
+    let (
+        new_vertices,
+        new_indices,
+        edge_midpoint_map,
+        new_quadratic_triangles,
+        new_quadratic_edges,
+    ) = match (&geometry.quadratic_triangles, &geometry.quadratic_edges) {
+        (Some(quadratic_triangles), quadratic_edges_opt) => {
+            println!("网格包含二阶三角形，使用二次形函数插值");
+            // 使用二次形函数插值进行细分
+            let (vertices, indices, edge_map, quad_triangles) =
+                quadratic_4_subdivision(original_vertices, original_indices, quadratic_triangles)?;
+
+            // 如果还有二次边，也进行细分
+            let (final_vertices, quad_edges) = if let Some(quadratic_edges) = quadratic_edges_opt {
+                println!("同时处理二阶边细分");
+                let (edge_vertices, subdivided_edges) =
+                    quadratic_edge_2_subdivision(&vertices, quadratic_edges)?;
+                (edge_vertices, subdivided_edges)
+            } else {
+                (vertices, Vec::new())
+            };
+
+            (
+                final_vertices,
+                indices,
+                edge_map,
+                quad_triangles,
+                quad_edges,
+            )
+        }
+        (None, Some(quadratic_edges)) => {
+            println!("网格只包含二阶边，使用边形函数插值");
+            // 处理二次边细分
+            let (edge_vertices, subdivided_edges) =
+                quadratic_edge_2_subdivision(original_vertices, quadratic_edges)?;
+
+            // 对于只有边的情况，也执行常规的三角形细分（如果有三角形的话）
+            let (vertices, indices, edge_map) =
+                smooth_4_subdivision(&edge_vertices, original_indices)?;
+
+            (vertices, indices, edge_map, Vec::new(), subdivided_edges)
+        }
+        (None, None) => {
+            println!("网格不包含二阶元素，使用线性插值");
+            // 执行标准4分细分
+            let (vertices, indices, edge_map) =
+                smooth_4_subdivision(original_vertices, original_indices)?;
+            (vertices, indices, edge_map, Vec::new(), Vec::new())
+        }
+    };
 
     // 插值属性数据
     let new_attributes = if let Some(attrs) = &geometry.attributes {
@@ -125,6 +184,15 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
         println!(
             "生成了 {} 个二次三角形",
             new_geometry.quadratic_triangles.as_ref().unwrap().len()
+        );
+    }
+
+    // 如果有新的二次边，添加到几何数据中
+    if !new_quadratic_edges.is_empty() {
+        new_geometry = new_geometry.add_quadratic_edges(new_quadratic_edges);
+        println!(
+            "生成了 {} 个二次边",
+            new_geometry.quadratic_edges.as_ref().unwrap().len()
         );
     }
 
@@ -483,6 +551,113 @@ fn quadratic_interpolation(r: f32, s: f32, control_points: &[[f32; 3]; 6]) -> [f
                   + w3 * control_points[3][i]  // p3贡献（边01中点）
                   + w4 * control_points[4][i]  // p4贡献（边12中点）
                   + w5 * control_points[5][i]; // p5贡献（边20中点）
+    }
+
+    result
+}
+
+/// 二次边2分细分 - 使用二次边形函数插值
+///
+/// 实现基于二次边形函数的2分细分算法，每个二次边分成2个完整的二次子边。
+/// 使用二次拉格朗日插值计算新的边点，保持曲线的精确度。
+/// 每个子边都包含完整的3个控制点，支持进一步的细分。
+///
+/// # 参数
+/// * `vertices` - 原始顶点列表
+/// * `quadratic_edges` - 二次边数据（包含完整的3个控制点）
+///
+/// # 返回值
+/// * `Ok((Vec<[f32; 3]>, Vec<QuadraticEdge>))` - (新顶点列表, 新的二次边列表)
+/// * `Err(VtkError)` - 如果细分失败，返回错误信息
+///
+/// # 二次边形函数
+/// 使用图8-16中定义的3个二次拉格朗日形函数：
+/// - W0 = 2(r - 0.5)(r - 1)
+/// - W1 = 2r(r - 0.5)
+/// - W2 = 4r(1 - r)
+///
+/// # 细分策略
+/// 每个二次边分成2个完整的二次子边：
+/// 1. 左半段子边：(p0, mid, new_left_mid)
+/// 2. 右半段子边：(mid, p1, new_right_mid)
+fn quadratic_edge_2_subdivision(
+    vertices: &Vec<[f32; 3]>,
+    quadratic_edges: &Vec<QuadraticEdge>,
+) -> Result<(Vec<[f32; 3]>, Vec<QuadraticEdge>), VtkError> {
+    let mut new_vertices = vertices.clone();
+    let mut new_quadratic_edges = Vec::new();
+
+    println!("二次边细分：处理 {} 个二次边", quadratic_edges.len());
+
+    for quadratic_edge in quadratic_edges.iter() {
+        // 获取二次边的控制点
+        let endpoints = quadratic_edge.endpoints();
+        let midpoint_idx = quadratic_edge.midpoint();
+        let p0 = vertices[endpoints[0] as usize]; // r=0端点
+        let p1 = vertices[endpoints[1] as usize]; // r=1端点
+        let p2 = vertices[midpoint_idx as usize]; // r=0.5中点
+
+        // 使用二次边形函数计算新的分割点
+        // 计算r=0.25处的点（左半段的中点）
+        let left_mid = quadratic_edge_interpolation(0.25, &[p0, p1, p2]);
+        let left_mid_idx = new_vertices.len() as u32;
+        new_vertices.push(left_mid);
+
+        // 计算r=0.75处的点（右半段的中点）
+        let right_mid = quadratic_edge_interpolation(0.75, &[p0, p1, p2]);
+        let right_mid_idx = new_vertices.len() as u32;
+        new_vertices.push(right_mid);
+
+        // 生成2个子边
+        // 1. 左半段子边：(p0, 原中点p2, 新left_mid)
+        let left_edge = QuadraticEdge::new([
+            endpoints[0], // p0
+            midpoint_idx, // 原中点，现在是左半段的终点
+            left_mid_idx, // 新的左半段中点
+        ]);
+        new_quadratic_edges.push(left_edge);
+
+        // 2. 右半段子边：(原中点p2, p1, 新right_mid)
+        let right_edge = QuadraticEdge::new([
+            midpoint_idx,  // 原中点，现在是右半段的起点
+            endpoints[1],  // p1
+            right_mid_idx, // 新的右半段中点
+        ]);
+        new_quadratic_edges.push(right_edge);
+    }
+
+    println!("总共生成了 {} 个新的二次边", new_quadratic_edges.len());
+
+    Ok((new_vertices, new_quadratic_edges))
+}
+
+/// 二次边拉格朗日插值函数
+///
+/// 根据参数坐标 r 和3个控制点，使用二次边形函数计算插值点坐标。
+///
+/// # 参数
+/// * `r` - 参数坐标r (0 <= r <= 1)
+/// * `control_points` - 3个控制点坐标 [p0, p1, p2]
+///
+/// # 返回值
+/// * `[f32; 3]` - 插值得到的点坐标
+///
+/// # 形函数定义（基于图8-16）
+/// - W0 = 2(r - 0.5)(r - 1) - 对应p0（r=0端点）
+/// - W1 = 2r(r - 0.5) - 对应p1（r=1端点）
+/// - W2 = 4r(1 - r) - 对应p2（r=0.5中点）
+fn quadratic_edge_interpolation(r: f32, control_points: &[[f32; 3]; 3]) -> [f32; 3] {
+    // 计算3个二次边形函数值
+    let w0 = 2.0 * (r - 0.5) * (r - 1.0); // W0 = 2(r-0.5)(r-1)
+    let w1 = 2.0 * r * (r - 0.5); // W1 = 2r(r-0.5)
+    let w2 = 4.0 * r * (1.0 - r); // W2 = 4r(1-r)
+
+    // 线性组合计算插值点坐标
+    let mut result = [0.0; 3];
+    for i in 0..3 {
+        result[i] = w0 * control_points[0][i]  // p0贡献
+                  + w1 * control_points[1][i]  // p1贡献
+                  + w2 * control_points[2][i]; // p2贡献（中点）
     }
 
     result
