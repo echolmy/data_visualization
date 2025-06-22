@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::utils::HashMap;
 
-use super::{GeometryData, QuadraticTriangle, VtkError};
+use super::{GeometryData, QuadraticEdge, QuadraticTriangle, VtkError};
 use crate::mesh::color_maps;
 use crate::mesh::triangulation;
 use vtkio::*;
@@ -655,11 +655,16 @@ pub trait VtkMeshExtractor {
 }
 
 impl UnstructuredGridExtractor {
-    // general triangulate cells - 使用通用三角化函数，返回二阶三角形数据
+    // general triangulate cells - 使用通用三角化函数，返回二阶三角形和二阶边数据
     fn triangulate_cells(
         &self,
         cells: model::Cells,
-    ) -> (Vec<u32>, Vec<usize>, Vec<QuadraticTriangle>) {
+    ) -> (
+        Vec<u32>,
+        Vec<usize>,
+        Vec<QuadraticTriangle>,
+        Vec<QuadraticEdge>,
+    ) {
         triangulation::triangulate_cells(cells)
     }
 }
@@ -711,7 +716,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
 
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32> {
         if let Some(model::Piece::Inline(piece)) = pieces.into_iter().next() {
-            let (indices, _, _) = self.triangulate_cells(piece.cells);
+            let (indices, _, _, _) = self.triangulate_cells(piece.cells);
             indices
         } else {
             Vec::new()
@@ -727,7 +732,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
         };
 
         let vertices = self.extract_vertices(&piece.points);
-        let (indices, triangle_to_cell_mapping, quadratic_triangles) =
+        let (indices, triangle_to_cell_mapping, quadratic_triangles, quadratic_edges) =
             self.triangulate_cells(piece.cells.clone()); // 使用clone来避免移动
         let attributes = self.extract_attributes_legacy(&pieces)?;
 
@@ -738,6 +743,11 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
         // 添加二阶三角形数据（如果有的话）
         if !quadratic_triangles.is_empty() {
             geometry = geometry.add_quadratic_triangles(quadratic_triangles);
+        }
+
+        // 添加二阶边数据（如果有的话）
+        if !quadratic_edges.is_empty() {
+            geometry = geometry.add_quadratic_edges(quadratic_edges);
         }
 
         Ok(geometry)

@@ -18,6 +18,23 @@ use vtkio::*;
 // AttributeType 和 AttributeLocation 在 vtk.rs 中定义并重新导出
 pub use self::vtk::{AttributeLocation, AttributeType};
 
+/// 二阶边数据结构
+///
+/// 二阶边包含3个控制点：2个端点和1个边中点
+/// 顶点布局（基于图8-16）：
+/// - vertices[0]: p0（r=0处的端点）
+/// - vertices[1]: p1（r=1处的端点）
+/// - vertices[2]: p2（r=0.5处的中点）
+///
+/// 对于渲染，可以分解为2个线性边段
+/// 中点 vertices[2] 用于细分操作
+#[derive(Debug, Clone)]
+pub struct QuadraticEdge {
+    /// 3个控制点的索引：[p0, p1, p2]
+    /// p0: r=0端点, p1: r=1端点, p2: r=0.5中点
+    pub vertices: [u32; 3],
+}
+
 /// 二阶三角形数据结构
 ///
 /// 二阶三角形包含6个控制点：3个角点和3个边中点
@@ -30,10 +47,39 @@ pub use self::vtk::{AttributeLocation, AttributeType};
 /// 对于渲染，只使用角顶点 [0,1,2]
 /// 边中点 [3,4,5] 保留用于后续的细分操作
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct QuadraticTriangle {
     /// 6个控制点的索引：[v0, v1, v2, m01, m12, m20]
     pub vertices: [u32; 6],
+}
+
+impl QuadraticEdge {
+    /// 创建新的二阶边
+    pub fn new(vertices: [u32; 3]) -> Self {
+        Self { vertices }
+    }
+
+    /// 获取端点索引（用于渲染）
+    pub fn endpoints(&self) -> [u32; 2] {
+        [self.vertices[0], self.vertices[1]]
+    }
+
+    /// 获取中点索引（用于细分）
+    pub fn midpoint(&self) -> u32 {
+        self.vertices[2]
+    }
+
+    /// 获取所有顶点索引
+    // pub fn all_vertices(&self) -> [u32; 3] {
+    //     self.vertices
+    // }
+
+    /// 转换为线性边段（分成两段）
+    pub fn to_linear_segments(&self) -> [[u32; 2]; 2] {
+        [
+            [self.vertices[0], self.vertices[2]], // 第一段：p0到p2
+            [self.vertices[2], self.vertices[1]], // 第二段：p2到p1
+        ]
+    }
 }
 
 #[allow(dead_code)]
@@ -84,6 +130,8 @@ pub struct GeometryData {
     pub triangle_to_cell_mapping: Option<Vec<usize>>,
     /// 二阶三角形数据，用于高级细分算法
     pub quadratic_triangles: Option<Vec<QuadraticTriangle>>,
+    /// 二阶边数据，用于高级边细分算法
+    pub quadratic_edges: Option<Vec<QuadraticEdge>>,
 }
 
 #[allow(dead_code)]
@@ -102,12 +150,19 @@ impl GeometryData {
             normals: None,
             triangle_to_cell_mapping: None,
             quadratic_triangles: None,
+            quadratic_edges: None,
         }
     }
 
     /// 添加二阶三角形数据
     pub fn add_quadratic_triangles(mut self, quadratic_triangles: Vec<QuadraticTriangle>) -> Self {
         self.quadratic_triangles = Some(quadratic_triangles);
+        self
+    }
+
+    /// 添加二阶边数据
+    pub fn add_quadratic_edges(mut self, quadratic_edges: Vec<QuadraticEdge>) -> Self {
+        self.quadratic_edges = Some(quadratic_edges);
         self
     }
 

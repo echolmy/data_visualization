@@ -1,4 +1,4 @@
-use super::QuadraticTriangle;
+use super::{QuadraticEdge, QuadraticTriangle};
 use vtkio::model::{self, VertexNumbers};
 
 /// 通用三角化模块，提供各种几何体的三角化功能
@@ -149,12 +149,20 @@ pub fn triangulate_polygon(topology: model::VertexNumbers) -> (Vec<u32>, Vec<usi
 /// * `cells` - cell data
 ///
 /// # return value
-/// * (triangle index list, triangle to original cell mapping, quadratic triangles)
-pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>, Vec<QuadraticTriangle>) {
+/// * (triangle index list, triangle to original cell mapping, quadratic triangles, quadratic edges)
+pub fn triangulate_cells(
+    cells: model::Cells,
+) -> (
+    Vec<u32>,
+    Vec<usize>,
+    Vec<QuadraticTriangle>,
+    Vec<QuadraticEdge>,
+) {
     // 初始化参数
     let mut indices = Vec::<u32>::with_capacity(cells.num_cells() * 3);
     let mut triangle_to_cell_mapping = Vec::new();
     let mut quadratic_triangles = Vec::new();
+    let mut quadratic_edges = Vec::new();
 
     // 将所有格式的数据统一为 (cell_type, vertices) 的格式
     let cell_data = extract_cell_data(cells);
@@ -165,13 +173,19 @@ pub fn triangulate_cells(cells: model::Cells) -> (Vec<u32>, Vec<usize>, Vec<Quad
             &mut indices,
             &mut triangle_to_cell_mapping,
             &mut quadratic_triangles,
+            &mut quadratic_edges,
             cell_idx,
             &cell_type,
             &vertices,
         );
     }
 
-    (indices, triangle_to_cell_mapping, quadratic_triangles)
+    (
+        indices,
+        triangle_to_cell_mapping,
+        quadratic_triangles,
+        quadratic_edges,
+    )
 }
 
 /// 从cells数据中提取统一格式的单元格数据
@@ -241,6 +255,7 @@ fn process_cell(
     indices: &mut Vec<u32>,
     triangle_to_cell_mapping: &mut Vec<usize>,
     quadratic_triangles: &mut Vec<QuadraticTriangle>,
+    quadratic_edges: &mut Vec<QuadraticEdge>,
     cell_idx: usize,
     cell_type: &model::CellType,
     vertices: &[u32],
@@ -293,7 +308,13 @@ fn process_cell(
 
         // 二阶单元格类型 - 需要特殊处理
         model::CellType::QuadraticEdge => {
-            process_quadratic_edge(indices, triangle_to_cell_mapping, cell_idx, vertices);
+            process_quadratic_edge(
+                indices,
+                triangle_to_cell_mapping,
+                quadratic_edges,
+                cell_idx,
+                vertices,
+            );
         }
 
         model::CellType::QuadraticTriangle => {
@@ -332,17 +353,30 @@ fn process_cell(
 fn process_quadratic_edge(
     indices: &mut Vec<u32>,
     triangle_to_cell_mapping: &mut Vec<usize>,
+    quadratic_edges: &mut Vec<QuadraticEdge>,
     cell_idx: usize,
     vertices: &[u32],
 ) {
     validate_vertex_count(vertices, 3, "quadratic edge");
-    // 二阶边分解为two个线性边，每个边转换为退化三角形
-    // 第一段：从起点到中点
-    indices.extend_from_slice(&[vertices[0], vertices[2], vertices[2]]);
-    // 第二段：从中点到终点
-    indices.extend_from_slice(&[vertices[2], vertices[1], vertices[1]]);
-    triangle_to_cell_mapping.push(cell_idx);
-    triangle_to_cell_mapping.push(cell_idx);
+
+    // 创建二阶边数据结构（保存完整的3个控制点信息）
+    let quadratic_edge = QuadraticEdge::new([
+        vertices[0], // p0: r=0端点
+        vertices[1], // p1: r=1端点
+        vertices[2], // p2: r=0.5中点
+    ]);
+
+    // 对于渲染，使用便利方法将二阶边分解为两个线性边
+    let linear_segments = quadratic_edge.to_linear_segments();
+
+    // 存储二阶边供后续细分使用
+    quadratic_edges.push(quadratic_edge);
+
+    // 将每个线性段转换为退化三角形进行渲染
+    for segment in linear_segments {
+        indices.extend_from_slice(&[segment[0], segment[1], segment[1]]);
+        triangle_to_cell_mapping.push(cell_idx);
+    }
 }
 
 /// 处理二阶三角形
