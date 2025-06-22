@@ -264,14 +264,19 @@ fn quadratic_4_subdivision(
     );
 
     for (_triangle_idx, quadratic_tri) in quadratic_triangles.iter().enumerate() {
-        // 获取二次三角形的6个控制点
-        let control_points = quadratic_tri.all_vertices();
-        let p0 = vertices[control_points[0] as usize]; // 角顶点0
-        let p1 = vertices[control_points[1] as usize]; // 角顶点1
-        let p2 = vertices[control_points[2] as usize]; // 角顶点2
-        let p3 = vertices[control_points[3] as usize]; // 边01中点
-        let p4 = vertices[control_points[4] as usize]; // 边12中点
-        let p5 = vertices[control_points[5] as usize]; // 边20中点
+        // 使用便利方法获取控制点索引，提高代码可读性和类型安全性
+        let corner_verts = quadratic_tri.corner_vertices(); // [v0, v1, v2] - 三个角顶点
+        let edge_mids = quadratic_tri.edge_midpoints(); // [m01, m12, m20] - 三个边中点
+
+        // 获取角顶点坐标
+        let p0 = vertices[corner_verts[0] as usize]; // 角顶点0
+        let p1 = vertices[corner_verts[1] as usize]; // 角顶点1
+        let p2 = vertices[corner_verts[2] as usize]; // 角顶点2
+
+        // 获取边中点坐标
+        let p3 = vertices[edge_mids[0] as usize]; // 边01中点
+        let p4 = vertices[edge_mids[1] as usize]; // 边12中点
+        let p5 = vertices[edge_mids[2] as usize]; // 边20中点
 
         // 确保按照逆时针顺序处理二次三角形
         // 原始二次三角形控制点顺序: [v0, v1, v2, m01, m12, m20]
@@ -281,8 +286,8 @@ fn quadratic_4_subdivision(
         let mid01 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
-            control_points[0],
-            control_points[1],
+            corner_verts[0],
+            corner_verts[1],
             &[p0, p1, p2, p3, p4, p5],
             (0.5, 0.0), // 边01中点的参数坐标
         );
@@ -290,8 +295,8 @@ fn quadratic_4_subdivision(
         let mid12 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
-            control_points[1],
-            control_points[2],
+            corner_verts[1],
+            corner_verts[2],
             &[p0, p1, p2, p3, p4, p5],
             (0.5, 0.5), // 边12中点的参数坐标
         );
@@ -299,8 +304,8 @@ fn quadratic_4_subdivision(
         let mid20 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
-            control_points[2],
-            control_points[0],
+            corner_verts[2],
+            corner_verts[0],
             &[p0, p1, p2, p3, p4, p5],
             (0.0, 0.5), // 边20中点的参数坐标
         );
@@ -310,7 +315,7 @@ fn quadratic_4_subdivision(
         let mid_mid01_v0 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
-            control_points[0],
+            corner_verts[0],
             mid01,
             &[p0, p1, p2, p3, p4, p5],
             (0.25, 0.0), // 细分后的边中点
@@ -321,7 +326,7 @@ fn quadratic_4_subdivision(
             &mut edge_midpoints,
             &mut new_vertices,
             mid01,
-            control_points[1],
+            corner_verts[1],
             &[p0, p1, p2, p3, p4, p5],
             (0.75, 0.0), // 细分后的边中点
         );
@@ -330,7 +335,7 @@ fn quadratic_4_subdivision(
         let mid_mid12_v1 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
-            control_points[1],
+            corner_verts[1],
             mid12,
             &[p0, p1, p2, p3, p4, p5],
             (0.75, 0.25), // 细分后的边中点
@@ -341,7 +346,7 @@ fn quadratic_4_subdivision(
             &mut edge_midpoints,
             &mut new_vertices,
             mid12,
-            control_points[2],
+            corner_verts[2],
             &[p0, p1, p2, p3, p4, p5],
             (0.25, 0.75), // 细分后的边中点
         );
@@ -350,7 +355,7 @@ fn quadratic_4_subdivision(
         let mid_mid20_v2 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
-            control_points[2],
+            corner_verts[2],
             mid20,
             &[p0, p1, p2, p3, p4, p5],
             (0.0, 0.75), // 细分后的边中点
@@ -361,7 +366,7 @@ fn quadratic_4_subdivision(
             &mut edge_midpoints,
             &mut new_vertices,
             mid20,
-            control_points[0],
+            corner_verts[0],
             &[p0, p1, p2, p3, p4, p5],
             (0.0, 0.25), // 细分后的边中点
         );
@@ -396,9 +401,9 @@ fn quadratic_4_subdivision(
 
         // 生成4个子三角形的索引（逆时针顺序）
         // 1. 左上角子三角形：(v0, mid01, mid20)
-        new_indices.extend_from_slice(&[control_points[0], mid01, mid20]);
+        new_indices.extend_from_slice(&[corner_verts[0], mid01, mid20]);
         let quad_tri_1 = QuadraticTriangle::new([
-            control_points[0],
+            corner_verts[0],
             mid01,
             mid20, // 角顶点
             mid_mid01_v0,
@@ -408,10 +413,10 @@ fn quadratic_4_subdivision(
         new_quadratic_triangles.push(quad_tri_1);
 
         // 2. 右下角子三角形：(mid01, v1, mid12)
-        new_indices.extend_from_slice(&[mid01, control_points[1], mid12]);
+        new_indices.extend_from_slice(&[mid01, corner_verts[1], mid12]);
         let quad_tri_2 = QuadraticTriangle::new([
             mid01,
-            control_points[1],
+            corner_verts[1],
             mid12, // 角顶点
             mid_mid01_v1,
             mid_mid12_v1,
@@ -420,11 +425,11 @@ fn quadratic_4_subdivision(
         new_quadratic_triangles.push(quad_tri_2);
 
         // 3. 左下角子三角形：(mid20, mid12, v2)
-        new_indices.extend_from_slice(&[mid20, mid12, control_points[2]]);
+        new_indices.extend_from_slice(&[mid20, mid12, corner_verts[2]]);
         let quad_tri_3 = QuadraticTriangle::new([
             mid20,
             mid12,
-            control_points[2], // 角顶点
+            corner_verts[2], // 角顶点
             mid_mid12_mid20,
             mid_mid12_v2,
             mid_mid20_v2, // 边中点
