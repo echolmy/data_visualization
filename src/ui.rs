@@ -6,6 +6,7 @@ use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
 use vtkio;
+
 #[derive(Event)]
 pub struct ModelLoadedEvent {
     pub position: Vec3,
@@ -20,11 +21,16 @@ pub struct CurrentModelData {
     pub geometry: Option<mesh::GeometryData>,
 }
 
+// 用于线程间传递文件路径的资源
+#[derive(Resource, Default)]
+pub struct PendingFileLoad {
+    pub file_path: Option<PathBuf>,
+}
+
 pub struct UIPlugin;
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<events::OpenFileEvent>()
-            .add_event::<events::LoadModelEvent>()
+        app.add_event::<events::LoadModelEvent>()
             .add_event::<events::ToggleWireframeEvent>() // register toggle wireframe event
             .add_event::<events::SubdivideMeshEvent>() // register subdivide mesh event
             .add_event::<events::GenerateWaveEvent>() // register generate wave event
@@ -32,11 +38,12 @@ impl Plugin for UIPlugin {
             .add_event::<events::ClearAllMeshesEvent>() // register clear all meshes event
             .add_event::<ModelLoadedEvent>() // register model loaded event
             .init_resource::<CurrentModelData>() // register current model data resource
-            .add_systems(
+            .init_resource::<PendingFileLoad>() // register pending file load resource
+                            .add_systems(
                 Update,
                 (
                     initialize_ui_systems,
-                    file_dialog_system,
+                    check_pending_file_load,       // add pending file load check system
                     load_resource,
                     handle_subdivision,            // add handle subdivision system
                     handle_wave_generation,        // add handle wave generation system
@@ -52,7 +59,7 @@ impl Plugin for UIPlugin {
 fn initialize_ui_systems(
     mut contexts: EguiContexts,
     keyboard_input: Res<ButtonInput<KeyCode>>, // 添加键盘输入
-    mut open_file_events: EventWriter<events::OpenFileEvent>,
+    mut load_events: EventWriter<events::LoadModelEvent>,
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
     mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
     mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
@@ -73,8 +80,21 @@ fn initialize_ui_systems(
             egui::menu::bar(ui, |ui| {
                 egui::menu::menu_button(ui, "File", |ui| {
                     if ui.button("Import").clicked() {
-                        // send an event
-                        open_file_events.send(events::OpenFileEvent);
+                        // 使用异步文件对话框避免主线程阻塞
+                        std::thread::spawn(move || {
+                            if let Some(file) = FileDialog::new()
+                                .add_filter("model", &["obj", "glb", "vtk", "vtu"])
+                                .set_directory(&std::env::var("HOME").unwrap_or_else(|_| "/".to_string()))
+                                .pick_file()
+                            {
+                                println!("Selected file: {}", file.display());
+                                // 通过文件系统传递路径（临时解决方案）
+                                let temp_file = std::env::temp_dir().join("pending_file_load.txt");
+                                if let Err(e) = std::fs::write(&temp_file, file.to_string_lossy().as_bytes()) {
+                                    eprintln!("Failed to write pending file: {}", e);
+                                }
+                            }
+                        });
                     }
                     if ui.button("Quit").clicked() {
                         std::process::exit(0);
@@ -121,23 +141,6 @@ fn initialize_ui_systems(
                 });
             });
         });
-    }
-}
-
-fn file_dialog_system(
-    mut open_events: EventReader<events::OpenFileEvent>,
-    mut load_events: EventWriter<events::LoadModelEvent>,
-) {
-    for _ in open_events.read() {
-        if let Some(file) = FileDialog::new()
-            .add_filter("model", &["obj", "glb", "vtk", "vtu"])
-            .set_directory("/")
-            .pick_file()
-        {
-            let filepath = PathBuf::from(file.display().to_string());
-            println!("open file: {}", filepath.display());
-            load_events.send(events::LoadModelEvent(filepath));
-        };
     }
 }
 
@@ -604,5 +607,25 @@ fn handle_clear_all_meshes(
                 });
             }
         }
+    }
+}
+
+/// 检查是否有待处理的文件加载请求
+fn check_pending_file_load(
+    mut load_events: EventWriter<events::LoadModelEvent>,
+) {
+    let temp_file = std::env::temp_dir().join("pending_file_load.txt");
+    
+    if temp_file.exists() {
+        if let Ok(file_path_str) = std::fs::read_to_string(&temp_file) {
+            let file_path = PathBuf::from(file_path_str.trim());
+            if file_path.exists() {
+                println!("Loading file from background thread: {}", file_path.display());
+                load_events.send(events::LoadModelEvent(file_path));
+            }
+        }
+        
+        // 清理临时文件
+        let _ = std::fs::remove_file(&temp_file);
     }
 }
