@@ -21,11 +21,7 @@ pub struct CurrentModelData {
     pub geometry: Option<mesh::GeometryData>,
 }
 
-// 用于线程间传递文件路径的资源
-#[derive(Resource, Default)]
-pub struct PendingFileLoad {
-    pub file_path: Option<PathBuf>,
-}
+
 
 pub struct UIPlugin;
 impl Plugin for UIPlugin {
@@ -38,7 +34,6 @@ impl Plugin for UIPlugin {
             .add_event::<events::ClearAllMeshesEvent>() // register clear all meshes event
             .add_event::<ModelLoadedEvent>() // register model loaded event
             .init_resource::<CurrentModelData>() // register current model data resource
-            .init_resource::<PendingFileLoad>() // register pending file load resource
                             .add_systems(
                 Update,
                 (
@@ -59,7 +54,7 @@ impl Plugin for UIPlugin {
 fn initialize_ui_systems(
     mut contexts: EguiContexts,
     keyboard_input: Res<ButtonInput<KeyCode>>, // 添加键盘输入
-    mut load_events: EventWriter<events::LoadModelEvent>,
+    _load_events: EventWriter<events::LoadModelEvent>, // 不再直接使用，通过临时文件传递
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
     mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
     mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
