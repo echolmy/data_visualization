@@ -1,3 +1,4 @@
+pub mod color_bar;
 pub mod events;
 use crate::mesh;
 use crate::mesh::vtk::VtkMeshExtractor;
@@ -6,6 +7,14 @@ use bevy_egui::*;
 use rfd::FileDialog;
 use std::path::PathBuf;
 use vtkio;
+
+// 重新导出颜色条相关的公共接口
+pub use color_bar::ColorBarConfig;
+
+/// 标记组件，用于标识用户导入的模型网格
+/// 只有带有此组件的网格才会受到颜色映射的影响
+#[derive(Component)]
+pub struct UserModelMesh;
 
 #[derive(Event)]
 pub struct ModelLoadedEvent {
@@ -21,8 +30,6 @@ pub struct CurrentModelData {
     pub geometry: Option<mesh::GeometryData>,
 }
 
-
-
 pub struct UIPlugin;
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
@@ -34,16 +41,19 @@ impl Plugin for UIPlugin {
             .add_event::<events::ClearAllMeshesEvent>() // register clear all meshes event
             .add_event::<ModelLoadedEvent>() // register model loaded event
             .init_resource::<CurrentModelData>() // register current model data resource
-                            .add_systems(
+            .init_resource::<ColorBarConfig>() // register color bar config resource
+            .add_systems(
                 Update,
                 (
                     initialize_ui_systems,
-                    check_pending_file_load,       // add pending file load check system
+                    check_pending_file_load, // add pending file load check system
                     load_resource,
                     handle_subdivision,            // add handle subdivision system
                     handle_wave_generation,        // add handle wave generation system
                     handle_wave_shader_generation, // add handle wave shader generation system
                     handle_clear_all_meshes,       // add handle clear all meshes system
+                    color_bar::render_color_bar,   // add color bar rendering system
+                    color_bar::apply_color_map_changes, // add color map change handling system
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -61,6 +71,7 @@ fn initialize_ui_systems(
     mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
     mut clear_events: EventWriter<events::ClearAllMeshesEvent>, // 添加清除所有mesh事件写入器
     current_model: Res<CurrentModelData>,                       // 添加当前模型数据访问
+    mut color_bar_config: ResMut<ColorBarConfig>,               // 添加颜色条配置访问
     windows: Query<&Window>,
 ) {
     // 处理键盘快捷键
@@ -79,13 +90,17 @@ fn initialize_ui_systems(
                         std::thread::spawn(move || {
                             if let Some(file) = FileDialog::new()
                                 .add_filter("model", &["obj", "glb", "vtk", "vtu"])
-                                .set_directory(&std::env::var("HOME").unwrap_or_else(|_| "/".to_string()))
+                                .set_directory(
+                                    &std::env::var("HOME").unwrap_or_else(|_| "/".to_string()),
+                                )
                                 .pick_file()
                             {
                                 println!("Selected file: {}", file.display());
                                 // 通过文件系统传递路径（临时解决方案）
                                 let temp_file = std::env::temp_dir().join("pending_file_load.txt");
-                                if let Err(e) = std::fs::write(&temp_file, file.to_string_lossy().as_bytes()) {
+                                if let Err(e) =
+                                    std::fs::write(&temp_file, file.to_string_lossy().as_bytes())
+                                {
                                     eprintln!("Failed to write pending file: {}", e);
                                 }
                             }
@@ -100,6 +115,18 @@ fn initialize_ui_systems(
                 egui::menu::menu_button(ui, "View", |ui| {
                     if ui.button("Wireframe").clicked() {
                         wireframe_toggle_events.send(events::ToggleWireframeEvent);
+                    }
+
+                    ui.separator();
+
+                    // 颜色条控制
+                    let color_bar_text = if color_bar_config.visible {
+                        "hide color bar"
+                    } else {
+                        "show color bar"
+                    };
+                    if ui.button(color_bar_text).clicked() {
+                        color_bar_config.visible = !color_bar_config.visible;
                     }
 
                     ui.separator();
@@ -165,6 +192,7 @@ fn load_resource(
     mut load_events: EventReader<events::LoadModelEvent>,
     mut model_loaded_events: EventWriter<ModelLoadedEvent>, // 添加事件写入器
     mut current_model: ResMut<CurrentModelData>,            // 添加当前模型数据
+    mut color_bar_config: ResMut<ColorBarConfig>,           // 添加颜色条配置
     mut egui_context: EguiContexts,
     windows: Query<&Window>,
 ) {
@@ -264,13 +292,23 @@ fn load_resource(
                 // 3. 保存几何数据到CurrentModelData
                 current_model.geometry = Some(geometry.clone());
 
+                // 自动更新颜色条数值范围
+                color_bar::update_color_bar_range_from_geometry(&geometry, &mut color_bar_config);
+
                 // 4. 使用已解析的geometry直接创建可渲染的mesh
-                let mesh = mesh::create_mesh_from_geometry(&geometry);
+                let mut mesh = mesh::create_mesh_from_geometry(&geometry);
+
+                // 5. 应用当前选择的颜色映射表（覆盖VTK文件中的默认颜色）
+                if let Err(e) =
+                    color_bar::apply_custom_color_mapping(&geometry, &mut mesh, &color_bar_config)
+                {
+                    println!("Failed to apply initial color mapping: {:?}", e);
+                }
 
                 let position = Vec3::new(0.0, 0.5, 0.0);
                 let scale = Vec3::ONE;
 
-                // 5. 计算模型包围盒
+                // 6. 计算模型包围盒
                 let mut bounds_min = None;
                 let mut bounds_max = None;
 
@@ -278,12 +316,12 @@ fn load_resource(
                     if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) =
                         positions
                     {
-                        // 6. 初始化包围盒
+                        // 7. 初始化包围盒
                         if !positions.is_empty() {
                             let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
                             let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
 
-                            // 7. 遍历所有顶点，更新包围盒
+                            // 8. 遍历所有顶点，更新包围盒
                             for pos in positions {
                                 let pos_vec = Vec3::new(pos[0], pos[1], pos[2]);
                                 min = min.min(pos_vec);
@@ -298,7 +336,7 @@ fn load_resource(
                     }
                 }
 
-                // 8. 创建实体
+                // 9. 创建实体
                 commands.spawn((
                     Mesh3d(meshes.add(mesh.clone())),
                     MeshMaterial3d(materials.add(StandardMaterial {
@@ -313,11 +351,12 @@ fn load_resource(
                     })),
                     Transform::from_translation(position),
                     Visibility::Visible,
+                    UserModelMesh, // 标记为用户导入的模型网格
                 ));
 
                 println!("number of vertices: {:?}", mesh.count_vertices());
 
-                // 9. 发送模型加载完成事件，包含包围盒信息
+                // 10. 发送模型加载完成事件，包含包围盒信息
                 model_loaded_events.send(ModelLoadedEvent {
                     position,
                     scale,
@@ -352,12 +391,13 @@ fn load_resource(
 
 /// 处理网格细分事件
 fn handle_subdivision(
-    mut commands: Commands,
+    _commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    _materials: ResMut<Assets<StandardMaterial>>,
     mut subdivide_events: EventReader<events::SubdivideMeshEvent>,
     mut current_model: ResMut<CurrentModelData>,
-    mut model_entities: Query<&mut Mesh3d>,
+    mut model_entities: Query<&mut Mesh3d, With<UserModelMesh>>,
+    color_bar_config: Res<ColorBarConfig>, // 添加颜色条配置访问
     mut egui_context: EguiContexts,
     windows: Query<&Window>,
 ) {
@@ -368,33 +408,36 @@ fn handle_subdivision(
             match mesh::subdivision::subdivide_mesh(geometry) {
                 Ok(subdivided_geometry) => {
                     // 使用通用的网格创建函数处理细分后的几何数据
-                    let new_mesh = mesh::create_mesh_from_geometry(&subdivided_geometry);
+                    let mut new_mesh = mesh::create_mesh_from_geometry(&subdivided_geometry);
 
-                    // 找到第一个模型实体并更新其mesh
+                    // 应用当前选择的颜色映射表到细分后的网格
+                    if let Err(e) = color_bar::apply_custom_color_mapping(
+                        &subdivided_geometry,
+                        &mut new_mesh,
+                        &color_bar_config,
+                    ) {
+                        println!("Failed to apply color mapping to subdivided mesh: {:?}", e);
+                    }
+
+                    // 找到用户模型实体并更新其mesh，应该总是只有一个
                     if let Ok(mut mesh3d) = model_entities.get_single_mut() {
                         *mesh3d = Mesh3d(meshes.add(new_mesh.clone()));
                         println!(
-                            "Updated existing mesh, now has {} vertices",
+                            "Updated existing user model mesh, now has {} vertices",
                             new_mesh.count_vertices()
                         );
                     } else {
-                        // 如果没有找到现有实体，则创建新的（降级处理）
-                        let position = Vec3::new(0.0, 0.5, 0.0);
-                        commands.spawn((
-                            Mesh3d(meshes.add(new_mesh.clone())),
-                            MeshMaterial3d(materials.add(StandardMaterial {
-                                base_color: Color::srgb(1.0, 1.0, 1.0),
-                                metallic: 0.0,
-                                perceptual_roughness: 0.5,
-                                reflectance: 0.0,
-                                cull_mode: None,
-                                unlit: true,
-                                alpha_mode: AlphaMode::Opaque,
-                                ..default()
-                            })),
-                            Transform::from_translation(position),
-                            Visibility::Visible,
-                        ));
+                        println!("Error: No user model entity found for subdivision! This should not happen.");
+                        if window_exists {
+                            egui::Window::new("Subdivision Error").show(
+                                egui_context.ctx_mut(),
+                                |ui| {
+                                    ui.label("Error: No user model found for subdivision");
+                                    ui.label("This should not happen - please report this bug");
+                                },
+                            );
+                        }
+                        return; // 早退出，不更新模型数据
                     }
 
                     // 更新当前模型数据 - 细分后的网格仍然是线性网格，可以继续细分
@@ -565,8 +608,8 @@ fn handle_wave_shader_generation(
 fn handle_clear_all_meshes(
     mut commands: Commands,
     mut clear_events: EventReader<events::ClearAllMeshesEvent>,
-    // 查询所有有Mesh3d但没有NoWireframe组件的实体（即用户导入的mesh，不包括坐标系和网格）
-    mesh_entities: Query<Entity, (With<Mesh3d>, Without<bevy::pbr::wireframe::NoWireframe>)>,
+    // 查询所有用户导入的网格实体
+    mesh_entities: Query<Entity, With<UserModelMesh>>,
     mut current_model: ResMut<CurrentModelData>,
     mut egui_context: EguiContexts,
     windows: Query<&Window>,
@@ -606,20 +649,21 @@ fn handle_clear_all_meshes(
 }
 
 /// 检查是否有待处理的文件加载请求
-fn check_pending_file_load(
-    mut load_events: EventWriter<events::LoadModelEvent>,
-) {
+fn check_pending_file_load(mut load_events: EventWriter<events::LoadModelEvent>) {
     let temp_file = std::env::temp_dir().join("pending_file_load.txt");
-    
+
     if temp_file.exists() {
         if let Ok(file_path_str) = std::fs::read_to_string(&temp_file) {
             let file_path = PathBuf::from(file_path_str.trim());
             if file_path.exists() {
-                println!("Loading file from background thread: {}", file_path.display());
+                println!(
+                    "Loading file from background thread: {}",
+                    file_path.display()
+                );
                 load_events.send(events::LoadModelEvent(file_path));
             }
         }
-        
+
         // 清理临时文件
         let _ = std::fs::remove_file(&temp_file);
     }

@@ -328,24 +328,22 @@ impl GeometryData {
                         for (i, &val) in data.iter().enumerate() {
                             if i < self.vertices.len() {
                                 let color = if range < 1e-10 {
-                                    // 当数据范围极小时（如理论解为常数的情况），使用实际值查找颜色
+                                    // 当数据范围极小时（如理论解为常数的情况），使用颜色映射表的中间颜色
                                     if i == 0 {
-                                        println!("Point data range is very small ({}), using actual value {} for color mapping", range, val);
+                                        println!("Point data range is very small ({}), using middle color for constant value {} ", range, val);
                                     }
-                                    // 使用实际值而不是归一化值来查找颜色
+                                    // 对于常数场，使用颜色映射表的中间颜色而不是根据值查找
                                     if let Some(lut) = lookup_table {
-                                        // 创建临时ColorMap进行查找
+                                        // 创建临时ColorMap并获取中间颜色
                                         let temp_color_map = color_maps::ColorMap {
                                             name: table_name.clone(),
                                             colors: lut.clone(),
                                         };
-                                        // 直接使用实际值，假设颜色映射表的范围是[0,1]
-                                        temp_color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                        temp_color_map.get_interpolated_color(0.5)
                                     } else {
-                                        // 使用默认的颜色映射
+                                        // 使用默认的颜色映射的中间颜色
                                         let color_map = color_maps::get_color_map(table_name);
-                                        // 对于u=1这样的值，直接映射到颜色表
-                                        color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                        color_map.get_interpolated_color(0.5)
                                     }
                                 } else {
                                     let normalized = (val - min_val) / range;
@@ -539,24 +537,22 @@ impl GeometryData {
                                 // 获取单元格的标量值并计算颜色
                                 let val = data[cell_idx];
                                 let color = if range < 1e-10 {
-                                    // 当数据范围极小时（如理论解为常数的情况），使用实际值查找颜色
+                                    // 当数据范围极小时（如理论解为常数的情况），使用颜色映射表的中间颜色
                                     if triangle_idx == 0 {
-                                        println!("Cell data range is very small ({}), using actual value {} for color mapping", range, val);
+                                        println!("Cell data range is very small ({}), using middle color for constant value {}", range, val);
                                     }
-                                    // 使用实际值而不是归一化值来查找颜色
+                                    // 对于常数场，使用颜色映射表的中间颜色而不是根据值查找
                                     if let Some(lut) = lookup_table {
-                                        // 创建临时ColorMap进行查找
+                                        // 创建临时ColorMap并获取中间颜色
                                         let temp_color_map = color_maps::ColorMap {
                                             name: table_name.clone(),
                                             colors: lut.clone(),
                                         };
-                                        // 直接使用实际值，假设颜色映射表的范围是[0,1]
-                                        temp_color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                        temp_color_map.get_interpolated_color(0.5)
                                     } else {
-                                        // 使用默认的颜色映射
+                                        // 使用默认的颜色映射的中间颜色
                                         let color_map = color_maps::get_color_map(table_name);
-                                        // 对于u=1这样的值，直接映射到颜色表
-                                        color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                        color_map.get_interpolated_color(0.5)
                                     }
                                 } else {
                                     let normalized = (val - min_val) / range;
