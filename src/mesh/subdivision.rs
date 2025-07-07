@@ -879,14 +879,35 @@ fn interpolate_point_attribute_for_subdivision(
             let mut new_data = data.clone();
             new_data.resize(new_vertex_count, 0.0);
 
-            // 为每个边中点插值标量值
-            for ((v0, v1), &midpoint_idx) in edge_midpoint_map.iter() {
-                let val0 = data.get(*v0 as usize).copied().unwrap_or(0.0);
-                let val1 = data.get(*v1 as usize).copied().unwrap_or(0.0);
-                let interpolated_val = (val0 + val1) * 0.5;
+            // 检测原始数据范围
+            let min_val = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+            let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+            let range = max_val - min_val;
 
-                if (midpoint_idx as usize) < new_data.len() {
-                    new_data[midpoint_idx as usize] = interpolated_val;
+            if range < 1e-10 {
+                // 当原始数据范围极小时（如理论解为常数的情况），使用恒定值
+                let avg_val = (min_val + max_val) * 0.5;
+                println!(
+                    "Original scalar data range is very small ({}), using constant value {} for subdivision",
+                    range, avg_val
+                );
+
+                // 为所有新边中点设置相同的值，保持"恒定"特性
+                for (_, &midpoint_idx) in edge_midpoint_map.iter() {
+                    if (midpoint_idx as usize) < new_data.len() {
+                        new_data[midpoint_idx as usize] = avg_val;
+                    }
+                }
+            } else {
+                // 正常插值处理
+                for ((v0, v1), &midpoint_idx) in edge_midpoint_map.iter() {
+                    let val0 = data.get(*v0 as usize).copied().unwrap_or(0.0);
+                    let val1 = data.get(*v1 as usize).copied().unwrap_or(0.0);
+                    let interpolated_val = (val0 + val1) * 0.5;
+
+                    if (midpoint_idx as usize) < new_data.len() {
+                        new_data[midpoint_idx as usize] = interpolated_val;
+                    }
                 }
             }
 
