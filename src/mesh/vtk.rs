@@ -327,31 +327,49 @@ impl GeometryData {
                         // 为每个顶点设置颜色
                         for (i, &val) in data.iter().enumerate() {
                             if i < self.vertices.len() {
-                                let normalized = if range > 0.0 {
-                                    (val - min_val) / range
+                                let color = if range < 1e-10 {
+                                    // 当数据范围极小时（如理论解为常数的情况），使用实际值查找颜色
+                                    if i == 0 {
+                                        println!("Point data range is very small ({}), using actual value {} for color mapping", range, val);
+                                    }
+                                    // 使用实际值而不是归一化值来查找颜色
+                                    if let Some(lut) = lookup_table {
+                                        // 创建临时ColorMap进行查找
+                                        let temp_color_map = color_maps::ColorMap {
+                                            name: table_name.clone(),
+                                            colors: lut.clone(),
+                                        };
+                                        // 直接使用实际值，假设颜色映射表的范围是[0,1]
+                                        temp_color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                    } else {
+                                        // 使用默认的颜色映射
+                                        let color_map = color_maps::get_color_map(table_name);
+                                        // 对于u=1这样的值，直接映射到颜色表
+                                        color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                    }
                                 } else {
-                                    0.5 // 防止除以0
-                                };
+                                    let normalized = (val - min_val) / range;
 
-                                // 使用ColorMap获取颜色（线性插值）
-                                let color = if let Some(lut) = lookup_table {
-                                    // 创建临时ColorMap进行插值
-                                    let temp_color_map = color_maps::ColorMap {
-                                        name: table_name.clone(),
-                                        colors: lut.clone(),
-                                    };
-                                    temp_color_map.get_interpolated_color(normalized)
-                                } else {
-                                    // 使用默认的颜色映射
-                                    let color_map = color_maps::get_color_map(table_name);
-                                    color_map.get_interpolated_color(normalized)
+                                    // 使用ColorMap获取颜色（线性插值）
+                                    if let Some(lut) = lookup_table {
+                                        // 创建临时ColorMap进行插值
+                                        let temp_color_map = color_maps::ColorMap {
+                                            name: table_name.clone(),
+                                            colors: lut.clone(),
+                                        };
+                                        temp_color_map.get_interpolated_color(normalized)
+                                    } else {
+                                        // 使用默认的颜色映射
+                                        let color_map = color_maps::get_color_map(table_name);
+                                        color_map.get_interpolated_color(normalized)
+                                    }
                                 };
 
                                 // Print debug info
                                 if i < 10 {
                                     // Only print first 10 vertices to avoid too much output
-                                    println!("Vertex {}: scalar value = {}, normalized value = {:.3}, interpolated color = [{:.3}, {:.3}, {:.3}, {:.3}]",
-                                        i, val, normalized, color[0], color[1], color[2], color[3]);
+                                    println!("Vertex {}: scalar value = {}, range = {}, color = [{:.3}, {:.3}, {:.3}, {:.3}]",
+                                        i, val, range, color[0], color[1], color[2], color[3]);
                                 }
 
                                 vertex_colors[i] = color;
@@ -518,26 +536,44 @@ impl GeometryData {
                                     continue;
                                 }
 
-                                // 获取单元格的标量值并归一化
+                                // 获取单元格的标量值并计算颜色
                                 let val = data[cell_idx];
-                                let normalized = if range > 0.0 {
-                                    (val - min_val) / range
+                                let color = if range < 1e-10 {
+                                    // 当数据范围极小时（如理论解为常数的情况），使用实际值查找颜色
+                                    if triangle_idx == 0 {
+                                        println!("Cell data range is very small ({}), using actual value {} for color mapping", range, val);
+                                    }
+                                    // 使用实际值而不是归一化值来查找颜色
+                                    if let Some(lut) = lookup_table {
+                                        // 创建临时ColorMap进行查找
+                                        let temp_color_map = color_maps::ColorMap {
+                                            name: table_name.clone(),
+                                            colors: lut.clone(),
+                                        };
+                                        // 直接使用实际值，假设颜色映射表的范围是[0,1]
+                                        temp_color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                    } else {
+                                        // 使用默认的颜色映射
+                                        let color_map = color_maps::get_color_map(table_name);
+                                        // 对于u=1这样的值，直接映射到颜色表
+                                        color_map.get_interpolated_color(val.clamp(0.0, 1.0))
+                                    }
                                 } else {
-                                    0.5 // 防止除以0
-                                };
+                                    let normalized = (val - min_val) / range;
 
-                                // 使用ColorMap获取颜色（线性插值）
-                                let color = if let Some(lut) = lookup_table {
-                                    // 创建临时ColorMap进行插值
-                                    let temp_color_map = color_maps::ColorMap {
-                                        name: table_name.clone(),
-                                        colors: lut.clone(),
-                                    };
-                                    temp_color_map.get_interpolated_color(normalized)
-                                } else {
-                                    // 使用默认的颜色映射
-                                    let color_map = color_maps::get_color_map(table_name);
-                                    color_map.get_interpolated_color(normalized)
+                                    // 使用ColorMap获取颜色（线性插值）
+                                    if let Some(lut) = lookup_table {
+                                        // 创建临时ColorMap进行插值
+                                        let temp_color_map = color_maps::ColorMap {
+                                            name: table_name.clone(),
+                                            colors: lut.clone(),
+                                        };
+                                        temp_color_map.get_interpolated_color(normalized)
+                                    } else {
+                                        // 使用默认的颜色映射
+                                        let color_map = color_maps::get_color_map(table_name);
+                                        color_map.get_interpolated_color(normalized)
+                                    }
                                 };
 
                                 // 获取这个三角形的三个顶点索引
@@ -567,8 +603,8 @@ impl GeometryData {
                                 // Print debug info
                                 if triangle_idx < 10 {
                                     // Only print first 10 triangles to avoid too much output
-                                    println!("Triangle {}, Cell {}: scalar value = {}, normalized value = {:.3}, interpolated color = [{:.3}, {:.3}, {:.3}, {:.3}]",
-                                        triangle_idx, cell_idx, val, normalized, color[0], color[1], color[2], color[3]);
+                                    println!("Triangle {}, Cell {}: scalar value = {}, range = {}, color = [{:.3}, {:.3}, {:.3}, {:.3}]",
+                                        triangle_idx, cell_idx, val, range, color[0], color[1], color[2], color[3]);
                                 }
                             }
                         }
