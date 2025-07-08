@@ -20,10 +20,6 @@ pub struct ColorBarConfig {
     pub title: String,
     /// 数值单位
     pub unit: String,
-    /// 颜色条宽度（像素）
-    pub width: f32,
-    /// 颜色条高度（像素）
-    pub height: f32,
     /// 标记配置是否发生变化，用于触发网格重新着色
     pub has_changed: bool,
 }
@@ -37,8 +33,6 @@ impl Default for ColorBarConfig {
             max_value: 1.0,
             title: "value".to_string(),
             unit: "".to_string(),
-            width: 30.0,
-            height: 200.0, // 减小默认高度，避免过高导致跳动
             has_changed: false,
         }
     }
@@ -47,226 +41,201 @@ impl Default for ColorBarConfig {
 /// 渲染颜色条UI
 ///
 /// 在界面右侧显示一个颜色条面板，显示当前颜色映射表和数值范围
-pub fn render_color_bar(
+/// 内联渲染颜色条（从initialize_ui_systems调用）
+/// 确保在TopBottomPanel之后立即显示SidePanel，避免布局冲突
+pub fn render_color_bar_inline(
     mut contexts: EguiContexts,
     mut color_bar_config: ResMut<ColorBarConfig>,
-    windows: Query<&Window>,
 ) {
-    // 检查窗口是否存在
-    if windows.iter().next().is_none() {
-        return;
-    }
-
-    if !color_bar_config.visible {
-        return;
-    }
-
-    // 在右侧显示颜色条面板 - 添加稳定性设置
+    // 使用 SidePanel，但设置正确的属性避免跳动
     egui::SidePanel::right("color_bar_panel")
-        .default_width(140.0) // 稍微增加默认宽度
-        .min_width(120.0) // 增加最小宽度确保内容显示完整
-        .max_width(220.0) // 增加最大宽度
-        .resizable(true)
+        .min_width(180.0) // 固定最小宽度
+        .max_width(180.0) // 固定最大宽度，防止调整大小
+        .default_width(180.0) // 固定默认宽度
+        .resizable(false) // 禁止用户调整大小
+        .show_separator_line(false) // 隐藏分隔线减少视觉干扰
         .show(contexts.ctx_mut(), |ui| {
-            ui.vertical_centered(|ui| {
-                ui.heading("color bar");
+            // 使用简单的垂直布局，不再使用复杂的绝对定位
+            ui.vertical(|ui| {
+                // ui.heading("color bar");
+
                 ui.separator();
 
                 // 颜色映射表选择
-                ui.group(|ui| {
-                    ui.label("color map:");
-                    let old_color_map = color_bar_config.color_map_name.clone();
-                    egui::ComboBox::from_label("")
-                        .selected_text(&color_bar_config.color_map_name)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
+                ui.label("Color Map:");
+                egui::ComboBox::from_id_salt("color_map")
+                    .selected_text(&color_bar_config.color_map_name)
+                    .width(100.0)
+                    .show_ui(ui, |ui| {
+                        let color_maps =
+                            ["default", "rainbow", "high_res_rainbow", "viridis", "hot"];
+                        for &color_map in &color_maps {
+                            let value = ui.selectable_value(
                                 &mut color_bar_config.color_map_name,
-                                "rainbow".to_string(),
-                                "rainbow",
+                                color_map.to_string(),
+                                color_map,
                             );
-                            ui.selectable_value(
-                                &mut color_bar_config.color_map_name,
-                                "high_res_rainbow".to_string(),
-                                "high_res_rainbow",
-                            );
-                            ui.selectable_value(
-                                &mut color_bar_config.color_map_name,
-                                "viridis".to_string(),
-                                "Viridis",
-                            );
-                            ui.selectable_value(
-                                &mut color_bar_config.color_map_name,
-                                "hot".to_string(),
-                                "hot",
-                            );
-                            ui.selectable_value(
-                                &mut color_bar_config.color_map_name,
-                                "default".to_string(),
-                                "default",
-                            );
-                        });
+                            if value.changed() {
+                                color_bar_config.has_changed = true;
+                            }
+                        }
+                    });
 
-                    // 检查颜色映射表是否发生变化
-                    if old_color_map != color_bar_config.color_map_name {
+                ui.separator();
+
+                // 数值范围控制
+                ui.label("Value Range:");
+
+                ui.horizontal(|ui| {
+                    ui.label("Min:");
+                    let min_response = ui.add_sized(
+                        [80.0, 20.0],
+                        egui::DragValue::new(&mut color_bar_config.min_value).speed(0.1),
+                    );
+                    if min_response.changed() {
                         color_bar_config.has_changed = true;
-                        println!(
-                            "Color map changed from {} to {}",
-                            old_color_map, color_bar_config.color_map_name
-                        );
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Max:");
+                    let max_response = ui.add_sized(
+                        [80.0, 20.0],
+                        egui::DragValue::new(&mut color_bar_config.max_value).speed(0.1),
+                    );
+                    if max_response.changed() {
+                        color_bar_config.has_changed = true;
                     }
                 });
 
                 ui.separator();
 
-                // 数值范围配置
-                ui.group(|ui| {
-                    ui.label("value range:");
-                    let old_min_value = color_bar_config.min_value;
-                    let old_max_value = color_bar_config.max_value;
-
-                    ui.horizontal(|ui| {
-                        ui.label("min value:");
-                        ui.add(
-                            egui::DragValue::new(&mut color_bar_config.min_value)
-                                .speed(0.1)
-                                .fixed_decimals(2),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("max value:");
-                        ui.add(
-                            egui::DragValue::new(&mut color_bar_config.max_value)
-                                .speed(0.1)
-                                .fixed_decimals(2),
-                        );
-                    });
-
-                    // 检查数值范围是否发生变化
-                    if old_min_value != color_bar_config.min_value
-                        || old_max_value != color_bar_config.max_value
-                    {
-                        color_bar_config.has_changed = true;
-                        println!(
-                            "Value range changed: min {} -> {}, max {} -> {}",
-                            old_min_value,
-                            color_bar_config.min_value,
-                            old_max_value,
-                            color_bar_config.max_value
-                        );
-                    }
-                });
-
-                ui.separator();
-
-                // 渲染颜色条
+                // 获取当前颜色映射表并渲染颜色条
                 let color_map = get_color_map(&color_bar_config.color_map_name);
-                render_color_gradient(ui, &color_map, &color_bar_config);
+                render_color_gradient_simple(ui, &color_map, &color_bar_config);
 
                 ui.separator();
 
-                // 标题和单位配置
-                ui.group(|ui| {
-                    ui.label("label setting:");
-                    ui.horizontal(|ui| {
-                        ui.label("title:");
-                        ui.text_edit_singleline(&mut color_bar_config.title);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("unit:");
-                        ui.text_edit_singleline(&mut color_bar_config.unit);
-                    });
+                // 标签设置
+                ui.label("Label Settings:");
+
+                ui.horizontal(|ui| {
+                    ui.label("Title:");
+                    let title_response = ui.add_sized(
+                        [80.0, 20.0],
+                        egui::TextEdit::singleline(&mut color_bar_config.title),
+                    );
+                    if title_response.changed() {
+                        color_bar_config.has_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Unit:");
+                    let unit_response = ui.add_sized(
+                        [70.0, 20.0],
+                        egui::TextEdit::singleline(&mut color_bar_config.unit),
+                    );
+                    if unit_response.changed() {
+                        color_bar_config.has_changed = true;
+                    }
                 });
 
                 ui.separator();
 
-                // 控制按钮
-                if ui.button("hide color bar").clicked() {
+                // 隐藏颜色条按钮
+                if ui
+                    .add_sized([100.0, 25.0], egui::Button::new("Hide Color Bar"))
+                    .clicked()
+                {
                     color_bar_config.visible = false;
                 }
             });
         });
 }
 
-/// 渲染颜色渐变条
+/// 使用简单布局渲染颜色渐变条
 ///
-/// 在UI中绘制实际的颜色渐变条和数值标签
-fn render_color_gradient(ui: &mut egui::Ui, color_map: &ColorMap, config: &ColorBarConfig) {
-    let bar_height = config.height;
-    let bar_width = config.width;
+/// 避免复杂的绝对定位，使用自然的UI布局
+fn render_color_gradient_simple(ui: &mut egui::Ui, color_map: &ColorMap, config: &ColorBarConfig) {
+    // 固定尺寸
+    let bar_width = 30.0;
+    let bar_height = 250.0;
 
     // 确保最小值小于最大值
     let min_val = config.min_value.min(config.max_value);
     let max_val = config.min_value.max(config.max_value);
     let value_range = max_val - min_val;
 
-    // 绘制颜色条主体
-    ui.vertical(|ui| {
-        // 标题
-        if !config.title.is_empty() {
-            ui.label(&config.title);
-        }
+    // 标题
+    if !config.title.is_empty() {
+        ui.label(&config.title);
+        ui.add_space(5.0);
+    }
 
-        ui.horizontal(|ui| {
-            // 颜色条本身
-            let (rect, _) = ui
-                .allocate_exact_size(egui::Vec2::new(bar_width, bar_height), egui::Sense::hover());
+    // 颜色条和标签水平布局
+    ui.horizontal(|ui| {
+        // 颜色条
+        let (rect, _) =
+            ui.allocate_exact_size(egui::Vec2::new(bar_width, bar_height), egui::Sense::hover());
 
-            if ui.is_rect_visible(rect) {
-                let painter = ui.painter();
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
 
-                // 绘制颜色渐变
-                let segments = 50; // 渐变分段数
-                let segment_height = bar_height / segments as f32;
+            // 绘制颜色渐变
+            let segments = 50;
+            let segment_height = bar_height / segments as f32;
 
-                for i in 0..segments {
-                    let t = 1.0 - (i as f32 / (segments - 1) as f32); // 从上到下，值从大到小
-                    let color_rgba = color_map.get_interpolated_color(t);
+            for i in 0..segments {
+                let t = 1.0 - (i as f32 / (segments - 1) as f32);
+                let color_rgba = color_map.get_interpolated_color(t);
 
-                    let color = egui::Color32::from_rgba_premultiplied(
-                        (color_rgba[0] * 255.0) as u8,
-                        (color_rgba[1] * 255.0) as u8,
-                        (color_rgba[2] * 255.0) as u8,
-                        (color_rgba[3] * 255.0) as u8,
-                    );
+                let color = egui::Color32::from_rgba_premultiplied(
+                    (color_rgba[0] * 255.0) as u8,
+                    (color_rgba[1] * 255.0) as u8,
+                    (color_rgba[2] * 255.0) as u8,
+                    (color_rgba[3] * 255.0) as u8,
+                );
 
-                    let segment_rect = egui::Rect::from_min_size(
-                        egui::Pos2::new(rect.min.x, rect.min.y + i as f32 * segment_height),
-                        egui::Vec2::new(bar_width, segment_height + 1.0), // +1 避免间隙
-                    );
+                let segment_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(rect.min.x, rect.min.y + i as f32 * segment_height),
+                    egui::Vec2::new(bar_width, segment_height + 1.0),
+                );
 
-                    painter.rect_filled(segment_rect, 0.0, color);
-                }
-
-                // 绘制边框
-                painter.rect_stroke(rect, 1.0, egui::Stroke::new(1.0, egui::Color32::GRAY));
+                painter.rect_filled(segment_rect, 0.0, color);
             }
 
-            // 数值标签 - 使用固定间距和一致格式避免跳动
-            ui.vertical(|ui| {
-                // 使用固定宽度格式避免因数字位数变化导致的跳动
-                let format_value = |val: f32, unit: &str| {
-                    if val.abs() < 1000.0 {
-                        format!("{:>6.2}{}", val, unit) // 右对齐，6位宽度
-                    } else {
-                        format!("{:>6.1e}{}", val, unit) // 科学计数法
-                    }
-                };
+            // 绘制边框
+            painter.rect_stroke(rect, 1.0, egui::Stroke::new(1.0, egui::Color32::GRAY));
+        }
 
-                // 最大值标签（顶部）
-                ui.label(format_value(max_val, &config.unit));
+        ui.add_space(8.0);
 
-                // 使用固定间距而不是基于颜色条高度的百分比
-                let label_spacing = (bar_height - 60.0) / 2.0; // 为3个标签预留空间
-                ui.add_space(label_spacing.max(20.0)); // 至少20像素间距
+        // 数值标签
+        ui.vertical(|ui| {
+            let format_value = |val: f32, unit: &str| {
+                if val.abs() < 1000.0 {
+                    format!("{:.2}{}", val, unit)
+                } else {
+                    format!("{:.1e}{}", val, unit)
+                }
+            };
 
-                // 中间值标签
-                let mid_val = min_val + value_range * 0.5;
-                ui.label(format_value(mid_val, &config.unit));
+            // 最大值（顶部）
+            ui.label(format_value(max_val, &config.unit));
 
-                // 最小值标签（底部）
-                ui.add_space(label_spacing.max(20.0)); // 至少20像素间距
-                ui.label(format_value(min_val, &config.unit));
-            });
+            // 固定间距
+            ui.add_space(95.0);
+
+            // 中间值
+            let mid_val = min_val + value_range * 0.5;
+            ui.label(format_value(mid_val, &config.unit));
+
+            // 固定间距
+            ui.add_space(95.0);
+
+            // 最小值（底部）
+            ui.label(format_value(min_val, &config.unit));
         });
     });
 }
