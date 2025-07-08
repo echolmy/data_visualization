@@ -52,7 +52,6 @@ impl Plugin for UIPlugin {
                     handle_wave_generation,        // add handle wave generation system
                     handle_wave_shader_generation, // add handle wave shader generation system
                     handle_clear_all_meshes,       // add handle clear all meshes system
-                    color_bar::render_color_bar,   // add color bar rendering system
                     color_bar::apply_color_map_changes, // add color map change handling system
                 )
                     .after(EguiSet::InitContexts),
@@ -163,6 +162,11 @@ fn initialize_ui_systems(
                 });
             });
         });
+
+        // 在TopBottomPanel之后立即显示SidePanel，确保正确的布局顺序
+        if color_bar_config.visible {
+            color_bar::render_color_bar_inline(contexts, color_bar_config);
+        }
     }
 }
 
@@ -209,8 +213,11 @@ fn load_resource(
                     Mesh3d(asset_server.load(format!("{}", path.to_string_lossy()))),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
-                        unlit: false,
-                        alpha_mode: AlphaMode::Blend,
+                        metallic: 0.2,                 // 轻微金属感，增强反射
+                        perceptual_roughness: 0.4,     // 略微光滑表面，更好的光照反应
+                        reflectance: 0.5,              // 适中反射率
+                        unlit: false,                  // 确保PBR光照开启
+                        alpha_mode: AlphaMode::Opaque, // 改为Opaque获得更好性能
                         ..default()
                     })),
                     Transform::from_translation(position).with_scale(scale),
@@ -341,12 +348,13 @@ fn load_resource(
                     Mesh3d(meshes.add(mesh.clone())),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::srgb(1.0, 1.0, 1.0),
-                        metallic: 0.0,
-                        perceptual_roughness: 0.5,
-                        reflectance: 0.0,
+                        metallic: 0.2,             // 轻微金属感，增强反射
+                        perceptual_roughness: 0.4, // 略微光滑表面，更好的光照反应
+                        reflectance: 0.5,          // 适中反射率
                         cull_mode: None,
-                        unlit: true,
+                        unlit: false, // 启用PBR光照！
                         alpha_mode: AlphaMode::Opaque,
+                        // 启用顶点颜色混合，保持颜色映射功能
                         ..default()
                     })),
                     Transform::from_translation(position),

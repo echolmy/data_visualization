@@ -266,16 +266,16 @@ fn process_cell(
         // 基本单元格类型
         model::CellType::Vertex => {
             validate_vertex_count(vertices, 1, "vertex");
-            // 转换单个顶点为退化三角形（使用同一顶点三次）
-            indices.extend_from_slice(&[vertices[0], vertices[0], vertices[0]]);
-            triangle_to_cell_mapping.push(cell_idx);
+            // 跳过顶点元素的渲染，点元素不适合3D面渲染
+            println!("Skip vertex element rendering (cell {})", cell_idx);
+            // 不添加任何渲染索引
         }
 
         model::CellType::Line => {
             validate_vertex_count(vertices, 2, "line");
-            // 转换线段为退化三角形（使用两个相同顶点）
-            indices.extend_from_slice(&[vertices[0], vertices[1], vertices[1]]);
-            triangle_to_cell_mapping.push(cell_idx);
+            // 跳过线元素的渲染，避免在PBR光照下产生不正确的视觉效果
+            println!("Skip line element rendering (cell {})", cell_idx);
+            // 不添加任何渲染索引
         }
 
         model::CellType::Triangle => {
@@ -308,13 +308,19 @@ fn process_cell(
 
         // 二阶单元格类型 - 需要特殊处理
         model::CellType::QuadraticEdge => {
-            process_quadratic_edge(
-                indices,
-                triangle_to_cell_mapping,
-                quadratic_edges,
-                cell_idx,
-                vertices,
-            );
+            // 跳过线元素的渲染，避免在PBR光照下产生不正确的视觉效果
+            // 线元素主要用于网格边界定义，不需要在3D渲染中显示
+            println!("Skip quadratic edge element rendering (cell {})", cell_idx);
+
+            // 仍然保存边数据供后续细分使用
+            let quadratic_edge = QuadraticEdge::new([
+                vertices[0], // p0: r=0端点
+                vertices[1], // p1: r=1端点
+                vertices[2], // p2: r=0.5中点
+            ]);
+            quadratic_edges.push(quadratic_edge);
+
+            // 不添加任何渲染索引，直接跳过
         }
 
         model::CellType::QuadraticTriangle => {
