@@ -30,10 +30,10 @@ use bevy::prelude::*;
 
 /// Camera movement speed (units per second)
 const MOVEMENT_SPEED: f32 = 5.0;
-/// Zoom speed multiplier
-const ZOOM_SPEED: f32 = 20.0;
+/// Base zoom speed multiplier
+const BASE_ZOOM_SPEED: f32 = 100.0; // 大幅增加基础缩放速度
 /// Camera distance factor for calculating appropriate viewing distance from models
-const CAMERA_DISTANCE_FACTOR: f32 = 5.0; // increase base distance factor
+const CAMERA_DISTANCE_FACTOR: f32 = 2.0; // 减少距离因子，让相机更靠近模型
 
 /// Component that marks the 3D world model camera
 ///
@@ -167,15 +167,27 @@ fn focus_camera_on_model(
                     let diagonal = max - min;
                     let max_dimension = diagonal.max_element();
                     // Use max dimension as model size to ensure model is fully in view
-                    (max_dimension, (min + max) / 2.0)
+                    println!("Model bounds: min={:?}, max={:?}", min, max);
+                    println!(
+                        "Model diagonal: {:?}, max_dimension: {}",
+                        diagonal, max_dimension
+                    );
+
+                    // 确保最小尺寸，避免模型太小导致相机过近
+                    let effective_size = max_dimension.max(0.1);
+                    (effective_size, (min + max) / 2.0)
                 } else {
                     // Otherwise use scale and position estimation
                     let size = event.scale.max_element().max(1.0) * 2.0;
+                    println!("Using scale-based size estimation: {}", size);
                     (size, model_position)
                 };
 
             // Calculate appropriate camera distance (based on model size)
             let camera_distance = model_size * CAMERA_DISTANCE_FACTOR;
+
+            // 限制相机距离的范围，避免过近或过远
+            let camera_distance = camera_distance.clamp(0.5, 100.0);
 
             // Use elevated viewing angle
             let offset = Vec3::new(0.8, 1.2, 0.8).normalize() * camera_distance;
@@ -193,8 +205,8 @@ fn focus_camera_on_model(
             rotation_controller.pitch = pitch;
 
             println!(
-                "Camera focused on model at center: {:?}, size: {}, distance: {}",
-                model_center, model_size, camera_distance
+                "Camera focused on model at center: {:?}, size: {}, distance: {}, position: {:?}",
+                model_center, model_size, camera_distance, camera_position
             );
         }
     }
@@ -240,36 +252,73 @@ fn camera_controller(
     if let Ok((mut transform, mut rotation_controller)) = controller_query.get_single_mut() {
         let mut movement = Vec3::ZERO;
 
+        // 检查是否按住Shift键进行快速移动
+        let is_fast_mode = keyboard_input.pressed(KeyCode::ShiftLeft)
+            || keyboard_input.pressed(KeyCode::ShiftRight);
+        let movement_multiplier = if is_fast_mode { 10.0 } else { 1.0 }; // 快速模式下移动速度x10
+
         // Translation controls
         // Keyboard input
         if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::ArrowUp) {
-            movement += transform.forward() * MOVEMENT_SPEED;
+            movement += transform.forward() * MOVEMENT_SPEED * movement_multiplier;
         }
 
         if keyboard_input.pressed(KeyCode::KeyA) || keyboard_input.pressed(KeyCode::ArrowLeft) {
-            movement += transform.left() * MOVEMENT_SPEED;
+            movement += transform.left() * MOVEMENT_SPEED * movement_multiplier;
         }
 
         if keyboard_input.pressed(KeyCode::KeyS) || keyboard_input.pressed(KeyCode::ArrowDown) {
-            movement += transform.back() * MOVEMENT_SPEED;
+            movement += transform.back() * MOVEMENT_SPEED * movement_multiplier;
         }
 
         if keyboard_input.pressed(KeyCode::KeyD) || keyboard_input.pressed(KeyCode::ArrowRight) {
-            movement += transform.right() * MOVEMENT_SPEED;
+            movement += transform.right() * MOVEMENT_SPEED * movement_multiplier;
         }
 
         if keyboard_input.pressed(KeyCode::KeyQ) {
-            movement += transform.up() * MOVEMENT_SPEED;
+            movement += transform.up() * MOVEMENT_SPEED * movement_multiplier;
         }
 
         if keyboard_input.pressed(KeyCode::KeyE) {
-            movement += transform.down() * MOVEMENT_SPEED;
+            movement += transform.down() * MOVEMENT_SPEED * movement_multiplier;
         }
 
-        // Mouse scroll wheel zoom
+        // Mouse scroll wheel zoom - 智能动态缩放
         if accumulated_mouse_scroll.delta != Vec2::ZERO {
-            let zoom_delta = accumulated_mouse_scroll.delta.y * ZOOM_SPEED;
+            // 计算相机到原点的距离（假设模型在原点附近）
+            let distance_to_origin = transform.translation.length();
+
+            // 基于距离的动态缩放速度：距离越远，缩放越快
+            // 最小速度为BASE_ZOOM_SPEED，随距离增加而增加
+            let dynamic_zoom_speed = BASE_ZOOM_SPEED * (1.0 + distance_to_origin * 0.1);
+
+            // 也考虑滚轮滚动的幅度，支持快速连续滚动
+            let scroll_intensity = accumulated_mouse_scroll.delta.y.abs().max(1.0);
+            let zoom_delta =
+                accumulated_mouse_scroll.delta.y * dynamic_zoom_speed * scroll_intensity;
+
             movement += transform.forward() * zoom_delta;
+
+            // 调试信息（可选）
+            if accumulated_mouse_scroll.delta.y.abs() > 0.1 {
+                println!(
+                    "Zoom: distance={:.1}, speed={:.1}, delta={:.1}",
+                    distance_to_origin, dynamic_zoom_speed, zoom_delta
+                );
+            }
+        }
+
+        // 相机重置功能 - 按R键重置相机到默认位置
+        if keyboard_input.just_pressed(KeyCode::KeyR) {
+            transform.translation = Vec3::new(10.0, 10.0, 10.0);
+            transform.look_at(Vec3::ZERO, Vec3::Y);
+
+            // 重置旋转控制器的角度
+            let (pitch, yaw, _) = transform.rotation.to_euler(EulerRot::XYZ);
+            rotation_controller.yaw = yaw;
+            rotation_controller.pitch = pitch;
+
+            println!("Camera reset to default position");
         }
 
         // Apply movement (frame-time based)
