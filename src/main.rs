@@ -1,6 +1,7 @@
 mod camera;
 mod environment;
 mod mesh;
+mod model_transform;
 mod render;
 mod ui;
 
@@ -10,6 +11,7 @@ use bevy_egui::*;
 use bevy_obj::ObjPlugin;
 use camera::CameraPlugin;
 use environment::EnvironmentPlugin;
+use model_transform::ModelTransformPlugin;
 use render::{animate_wave_shader, create_wireframe_config, toggle_wireframe, WaveMaterial};
 use std::sync::atomic::{AtomicBool, Ordering};
 use ui::UIPlugin;
@@ -32,6 +34,7 @@ fn main() {
         .add_plugins(UIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(EnvironmentPlugin)
+        .add_plugins(ModelTransformPlugin) // 添加模型变换功能
         // 添加线框渲染功能
         .add_plugins(WireframePlugin)
         .insert_resource(create_wireframe_config())
