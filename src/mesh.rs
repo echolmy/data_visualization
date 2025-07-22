@@ -74,6 +74,7 @@ impl QuadraticEdge {
     // }
 
     /// 转换为线性边段（分成两段）
+    #[allow(dead_code)]
     pub fn to_linear_segments(&self) -> [[u32; 2]; 2] {
         [
             [self.vertices[0], self.vertices[2]], // 第一段：p0到p2
@@ -113,7 +114,7 @@ impl QuadraticTriangle {
 /// 核心几何数据结构
 ///
 /// 包含网格的所有几何信息和属性数据，支持线性和二阶网格
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GeometryData {
     /// 顶点坐标
     pub vertices: Vec<[f32; 3]>,

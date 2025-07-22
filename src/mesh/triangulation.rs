@@ -356,6 +356,7 @@ fn process_cell(
 }
 
 /// 处理二阶边
+#[allow(dead_code)]
 fn process_quadratic_edge(
     indices: &mut Vec<u32>,
     triangle_to_cell_mapping: &mut Vec<usize>,
