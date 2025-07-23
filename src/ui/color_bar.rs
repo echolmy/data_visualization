@@ -44,7 +44,7 @@ impl Default for ColorBarConfig {
 /// 内联渲染颜色条（从initialize_ui_systems调用）
 /// 确保在TopBottomPanel之后立即显示SidePanel，避免布局冲突
 pub fn render_color_bar_inline(
-    mut contexts: EguiContexts,
+    contexts: &mut EguiContexts,
     mut color_bar_config: ResMut<ColorBarConfig>,
 ) {
     // 使用 SidePanel，但设置正确的属性避免跳动
