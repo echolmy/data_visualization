@@ -38,12 +38,22 @@ pub struct TimeSeriesAsset {
     pub fps: f32,                 // 播放帧率
     pub timer: Timer,             // 播放计时器
     pub loop_animation: bool,     // 是否循环播放
+    pub colors_need_update: bool, // 标记颜色是否需要更新
 }
 
 /// 时间序列动画事件
 #[derive(Event)]
 pub enum TimeSeriesEvent {
     LoadSeries(Vec<PathBuf>), // 加载时间序列文件
+    // 第二步：动画控制事件
+    Play,               // 播放动画
+    Pause,              // 暂停动画
+    Stop,               // 停止动画
+    SetTimeStep(usize), // 设置到指定时间步
+    NextTimeStep,       // 下一时间步
+    PrevTimeStep,       // 上一时间步
+    SetFPS(f32),        // 设置播放帧率
+    ToggleLoop,         // 切换循环播放
 }
 
 impl Default for TimeSeriesAsset {
@@ -71,6 +81,7 @@ impl Default for TimeSeriesAsset {
             fps: 10.0,
             timer: Timer::from_seconds(0.1, TimerMode::Repeating),
             loop_animation: true,
+            colors_need_update: false,
         }
     }
 }
@@ -106,6 +117,83 @@ impl TimeSeriesAsset {
     pub fn get_current_time_step_data(&self) -> Option<&TimeStepData> {
         self.time_steps.get(self.current_time_step)
     }
+
+    /// 播放动画
+    pub fn play(&mut self) {
+        if self.is_step2_complete && !self.time_steps.is_empty() {
+            self.is_playing = true;
+            self.colors_need_update = true; // 开始播放时确保颜色更新
+            println!("开始播放时序动画，共{}帧", self.time_steps.len());
+        }
+    }
+
+    /// 暂停动画
+    pub fn pause(&mut self) {
+        self.is_playing = false;
+        println!("暂停动画在第{}帧", self.current_time_step);
+    }
+
+    /// 停止动画并回到第一帧
+    pub fn stop(&mut self) {
+        self.is_playing = false;
+        self.current_time_step = 0;
+        println!("停止动画并回到第0帧");
+    }
+
+    /// 设置到指定时间步
+    pub fn set_time_step(&mut self, step: usize) {
+        if step < self.time_steps.len() && step != self.current_time_step {
+            self.current_time_step = step;
+            self.colors_need_update = true; // 标记需要更新颜色
+            println!("设置到第{}帧", step);
+        }
+    }
+
+    /// 下一时间步
+    pub fn next_time_step(&mut self) {
+        if !self.time_steps.is_empty() {
+            let old_step = self.current_time_step;
+            if self.current_time_step < self.time_steps.len() - 1 {
+                self.current_time_step += 1;
+            } else if self.loop_animation {
+                self.current_time_step = 0;
+            } else {
+                self.is_playing = false;
+            }
+
+            if old_step != self.current_time_step {
+                self.colors_need_update = true; // 标记需要更新颜色
+            }
+        }
+    }
+
+    /// 上一时间步
+    pub fn prev_time_step(&mut self) {
+        if !self.time_steps.is_empty() {
+            let old_step = self.current_time_step;
+            if self.current_time_step > 0 {
+                self.current_time_step -= 1;
+            } else if self.loop_animation {
+                self.current_time_step = self.time_steps.len() - 1;
+            }
+
+            if old_step != self.current_time_step {
+                self.colors_need_update = true; // 标记需要更新颜色
+            }
+        }
+    }
+
+    /// 设置播放帧率
+    pub fn set_fps(&mut self, fps: f32) {
+        self.fps = fps.clamp(0.1, 60.0);
+        self.timer = Timer::from_seconds(1.0 / self.fps, TimerMode::Repeating);
+        println!("设置播放帧率为{}fps", self.fps);
+    }
+
+    /// 获取总时间步数
+    pub fn get_total_time_steps(&self) -> usize {
+        self.time_steps.len()
+    }
 }
 
 /// 时间序列动画插件
@@ -122,9 +210,9 @@ impl Plugin for TimeSeriesAnimationPlugin {
                     trigger_first_frame_import, // 第一步：触发单个文件导入
                     detect_step1_completion,    // 检测第一步完成
                     load_all_time_series_data,  // 第二步：加载所有时间序列数据
-                                                // 未来添加：动画播放系统
-                                                // update_animation_timer,
-                                                // update_mesh_colors,
+                    // 第二步：动画播放系统
+                    update_animation_timer,  // 动画计时器
+                    update_animation_colors, // 动画颜色更新
                 )
                     .chain(), // 确保系统按顺序执行
             );
@@ -141,8 +229,141 @@ fn handle_time_series_events(
             TimeSeriesEvent::LoadSeries(file_paths) => {
                 time_series_asset.start_loading(file_paths.clone());
             }
+            TimeSeriesEvent::Play => {
+                time_series_asset.play();
+            }
+            TimeSeriesEvent::Pause => {
+                time_series_asset.pause();
+            }
+            TimeSeriesEvent::Stop => {
+                time_series_asset.stop();
+            }
+            TimeSeriesEvent::SetTimeStep(step) => {
+                time_series_asset.set_time_step(*step);
+            }
+            TimeSeriesEvent::NextTimeStep => {
+                time_series_asset.next_time_step();
+            }
+            TimeSeriesEvent::PrevTimeStep => {
+                time_series_asset.prev_time_step();
+            }
+            TimeSeriesEvent::SetFPS(fps) => {
+                time_series_asset.set_fps(*fps);
+            }
+            TimeSeriesEvent::ToggleLoop => {
+                time_series_asset.loop_animation = !time_series_asset.loop_animation;
+                println!("循环播放: {}", time_series_asset.loop_animation);
+            }
         }
     }
+}
+
+/// 动画计时器更新系统
+fn update_animation_timer(time: Res<Time>, mut time_series_asset: ResMut<TimeSeriesAsset>) {
+    if time_series_asset.is_playing && time_series_asset.is_step2_complete {
+        time_series_asset.timer.tick(time.delta());
+        if time_series_asset.timer.finished() {
+            time_series_asset.next_time_step();
+        }
+    }
+}
+
+/// 动画颜色更新系统 - 根据当前时间步更新网格顶点颜色
+fn update_animation_colors(
+    mut time_series_asset: ResMut<TimeSeriesAsset>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mesh_query: Query<&Mesh3d, With<crate::ui::UserModelMesh>>,
+    color_bar_config: Res<crate::ui::ColorBarConfig>,
+) {
+    // 只有在时间序列完全加载且需要更新颜色时才处理
+    if !time_series_asset.is_step2_complete
+        || time_series_asset.time_steps.is_empty()
+        || !time_series_asset.colors_need_update
+    {
+        return;
+    }
+
+    // 获取当前时间步的标量数据
+    let current_data = match time_series_asset.get_current_time_step_data() {
+        Some(data) => data,
+        None => return,
+    };
+
+    // 查找用户模型网格并更新颜色
+    let mesh_count = mesh_query.iter().count();
+    if mesh_count > 0 {
+        for mesh3d in mesh_query.iter() {
+            if let Some(mesh) = meshes.get_mut(&mesh3d.0) {
+                // 使用现有的颜色映射函数更新顶点颜色
+                apply_scalar_colors_to_mesh(mesh, &current_data.scalars, &color_bar_config);
+                println!(
+                    "Updated mesh colors for time step {} with {} scalars",
+                    time_series_asset.current_time_step,
+                    current_data.scalars.len()
+                );
+            }
+        }
+        // 清除更新标记
+        time_series_asset.colors_need_update = false;
+    }
+}
+
+/// 应用标量值到网格顶点颜色
+fn apply_scalar_colors_to_mesh(
+    mesh: &mut Mesh,
+    scalars: &[f32],
+    color_bar_config: &crate::ui::ColorBarConfig,
+) {
+    use crate::mesh::color_maps::get_color_map;
+
+    // 获取顶点数量
+    let vertex_count = mesh.count_vertices();
+
+    // 确保标量数据数量与顶点数量匹配
+    if scalars.len() != vertex_count {
+        println!(
+            "警告：标量数据数量({})与顶点数量({})不匹配",
+            scalars.len(),
+            vertex_count
+        );
+        return;
+    }
+
+    // 计算标量值的范围
+    let (min_val, max_val) = scalars
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(min, max), &val| {
+            (min.min(val), max.max(val))
+        });
+
+    // 使用ColorBarConfig中的范围，如果范围为0则使用自动范围
+    let (range_min, range_max) = if color_bar_config.max_value > color_bar_config.min_value {
+        (color_bar_config.min_value, color_bar_config.max_value)
+    } else {
+        (min_val, max_val)
+    };
+
+    // 获取当前选择的颜色映射表
+    let color_map = get_color_map(&color_bar_config.color_map_name);
+
+    // 生成颜色数据
+    let colors: Vec<[f32; 4]> = scalars
+        .iter()
+        .map(|&scalar| {
+            // 将标量值归一化到[0, 1]范围
+            let normalized = if range_max > range_min {
+                ((scalar - range_min) / (range_max - range_min)).clamp(0.0, 1.0)
+            } else {
+                0.5 // 如果范围为0，使用中间值
+            };
+
+            // 使用颜色映射表获取颜色
+            color_map.get_interpolated_color(normalized)
+        })
+        .collect();
+
+    // 更新网格的顶点颜色属性
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
 }
 
 /// 第一步：触发第0帧的单个文件导入（完全使用现有的单个文件导入逻辑）
