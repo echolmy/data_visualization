@@ -70,7 +70,7 @@ fn initialize_ui_systems(
     mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
     mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
     mut clear_events: EventWriter<events::ClearAllMeshesEvent>, // 添加清除所有mesh事件写入器
-    _time_series_events: EventWriter<TimeSeriesEvent>,          // 添加时间序列事件写入器
+    mut time_series_events: EventWriter<TimeSeriesEvent>,       // 添加时间序列事件写入器
     current_model: Res<CurrentModelData>,                       // 添加当前模型数据访问
     animation_asset: Res<crate::animation::TimeSeriesAsset>,    // 添加动画资产访问
     mut color_bar_config: ResMut<ColorBarConfig>,               // 添加颜色条配置访问
@@ -265,21 +265,131 @@ fn initialize_ui_systems(
             color_bar::render_color_bar_inline(&mut contexts, color_bar_config);
         }
 
-        // 添加时间序列状态面板（简化版）
+        // 添加时间序列动画控制面板
         if animation_asset.is_loaded {
-            egui::TopBottomPanel::bottom("time_series_status")
+            egui::TopBottomPanel::bottom("time_series_animation")
                 .resizable(false)
-                .min_height(50.0)
+                .min_height(120.0)
                 .show(contexts.ctx_mut(), |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("Time Series Loaded (Single File Mode)");
-                        ui.label("This works just like importing a single VTU file.");
-                        if let Some(current_data) = animation_asset.get_current_time_step_data() {
-                            if let Some(file_name) = current_data.file_path.file_name() {
-                                if let Some(name_str) = file_name.to_str() {
-                                    ui.label(format!("File: {}", name_str));
-                                }
+                    ui.vertical(|ui| {
+                        // 标题和状态信息
+                        ui.horizontal(|ui| {
+                            ui.heading("Time Series Animation Control");
+                            ui.separator();
+                            if animation_asset.is_step2_complete {
+                                ui.colored_label(egui::Color32::GREEN, "✓ Animation Ready");
+                            } else {
+                                ui.colored_label(egui::Color32::YELLOW, "● Loading...");
                             }
+                        });
+
+                        ui.separator();
+
+                        // 只有当第二步完成时才显示动画控制
+                        if animation_asset.is_step2_complete {
+                            // 播放控制按钮
+                            ui.horizontal(|ui| {
+                                // 播放/暂停按钮
+                                if animation_asset.is_playing {
+                                    if ui.button("⏸ Pause").clicked() {
+                                        time_series_events.send(TimeSeriesEvent::Pause);
+                                    }
+                                } else {
+                                    if ui.button("▶ Play").clicked() {
+                                        time_series_events.send(TimeSeriesEvent::Play);
+                                    }
+                                }
+
+                                // 停止按钮
+                                if ui.button("⏹ Stop").clicked() {
+                                    time_series_events.send(TimeSeriesEvent::Stop);
+                                }
+
+                                ui.separator();
+
+                                // 单步控制
+                                if ui.button("⏮ Prev Frame").clicked() {
+                                    time_series_events.send(TimeSeriesEvent::PrevTimeStep);
+                                }
+                                if ui.button("⏭ Next Frame").clicked() {
+                                    time_series_events.send(TimeSeriesEvent::NextTimeStep);
+                                }
+
+                                ui.separator();
+
+                                // 循环播放切换
+                                let loop_text = if animation_asset.loop_animation {
+                                    "🔄 Loop On"
+                                } else {
+                                    "🔄 Loop Off"
+                                };
+                                if ui.button(loop_text).clicked() {
+                                    time_series_events.send(TimeSeriesEvent::ToggleLoop);
+                                }
+                            });
+
+                            // 时间步进度条
+                            ui.horizontal(|ui| {
+                                ui.label("Time Step:");
+                                let total_steps = animation_asset.get_total_time_steps();
+                                let mut current_step = animation_asset.current_time_step;
+
+                                if ui
+                                    .add(
+                                        egui::Slider::new(
+                                            &mut current_step,
+                                            0..=(total_steps.saturating_sub(1)),
+                                        )
+                                        .text("Frame")
+                                        .show_value(true),
+                                    )
+                                    .changed()
+                                {
+                                    time_series_events
+                                        .send(TimeSeriesEvent::SetTimeStep(current_step));
+                                }
+
+                                ui.label(format!("{}/{}", current_step + 1, total_steps));
+                            });
+
+                            // FPS控制
+                            ui.horizontal(|ui| {
+                                ui.label("Playback Speed:");
+                                let mut fps = animation_asset.fps;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut fps, 0.1..=30.0)
+                                            .text("FPS")
+                                            .show_value(true),
+                                    )
+                                    .changed()
+                                {
+                                    time_series_events.send(TimeSeriesEvent::SetFPS(fps));
+                                }
+                            });
+
+                            // 当前文件信息
+                            if let Some(current_data) = animation_asset.get_current_time_step_data()
+                            {
+                                ui.horizontal(|ui| {
+                                    ui.label("Current File:");
+                                    if let Some(file_name) = current_data.file_path.file_name() {
+                                        if let Some(name_str) = file_name.to_str() {
+                                            ui.monospace(name_str);
+                                        }
+                                    }
+                                });
+                            }
+                        } else {
+                            // 第二步加载状态
+                            ui.horizontal(|ui| {
+                                ui.label("Status: Loading time series data...");
+                                ui.label(format!(
+                                    "Loaded: {}/{}",
+                                    animation_asset.time_steps.len(),
+                                    animation_asset.all_file_paths.len()
+                                ));
+                            });
                         }
                     });
                 });
