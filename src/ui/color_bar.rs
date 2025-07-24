@@ -28,7 +28,7 @@ impl Default for ColorBarConfig {
     fn default() -> Self {
         Self {
             visible: true,
-            color_map_name: "rainbow".to_string(),
+            color_map_name: "high_res_rainbow".to_string(),
             min_value: 0.0,
             max_value: 1.0,
             title: "value".to_string(),
@@ -67,8 +67,15 @@ pub fn render_color_bar_inline(
                     .selected_text(&color_bar_config.color_map_name)
                     .width(100.0)
                     .show_ui(ui, |ui| {
-                        let color_maps =
-                            ["default", "rainbow", "high_res_rainbow", "viridis", "hot"];
+                        let color_maps = [
+                            "default",
+                            "rainbow",
+                            "high_res_rainbow",
+                            "viridis",
+                            "hot",
+                            "cool",
+                            "warm",
+                        ];
                         for &color_map in &color_maps {
                             let value = ui.selectable_value(
                                 &mut color_bar_config.color_map_name,
