@@ -1,3 +1,4 @@
+mod animation;
 mod camera;
 mod environment;
 mod lod;
@@ -6,6 +7,7 @@ mod model_transform;
 mod render;
 mod ui;
 
+use animation::TimeSeriesAnimationPlugin;
 use bevy::pbr::wireframe::WireframePlugin;
 use bevy::{pbr::MaterialPlugin, prelude::*};
 use bevy_egui::*;
@@ -38,6 +40,7 @@ fn main() {
         .add_plugins(EnvironmentPlugin)
         .add_plugins(ModelTransformPlugin) // 添加模型变换功能
         .add_plugins(LODPlugin) // 添加细节层次插件
+        .add_plugins(TimeSeriesAnimationPlugin) // 添加时间序列动画插件
         // 添加线框渲染功能
         .add_plugins(WireframePlugin)
         .insert_resource(create_wireframe_config())
