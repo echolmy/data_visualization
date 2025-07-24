@@ -1,5 +1,6 @@
 pub mod color_bar;
 pub mod events;
+use crate::animation::TimeSeriesEvent;
 use crate::mesh;
 use crate::mesh::vtk::VtkMeshExtractor;
 use bevy::prelude::*;
@@ -69,7 +70,9 @@ fn initialize_ui_systems(
     mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
     mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
     mut clear_events: EventWriter<events::ClearAllMeshesEvent>, // 添加清除所有mesh事件写入器
+    _time_series_events: EventWriter<TimeSeriesEvent>,          // 添加时间序列事件写入器
     current_model: Res<CurrentModelData>,                       // 添加当前模型数据访问
+    animation_asset: Res<crate::animation::TimeSeriesAsset>,    // 添加动画资产访问
     mut color_bar_config: ResMut<ColorBarConfig>,               // 添加颜色条配置访问
     windows: Query<&Window>,
 ) {
@@ -105,6 +108,86 @@ fn initialize_ui_systems(
                             }
                         });
                     }
+
+                    ui.separator();
+
+                    if ui.button("Import Time Series").clicked() {
+                        // 选择时间序列文件夹
+                        std::thread::spawn(move || {
+                            if let Some(folder) = FileDialog::new()
+                                .set_directory(
+                                    &std::env::var("HOME").unwrap_or_else(|_| "/".to_string()),
+                                )
+                                .pick_folder()
+                            {
+                                println!("Selected time series folder: {}", folder.display());
+                                // 扫描文件夹中的 VTU 文件
+                                let mut vtu_files = Vec::new();
+                                if let Ok(entries) = std::fs::read_dir(&folder) {
+                                    for entry in entries {
+                                        if let Ok(entry) = entry {
+                                            let path = entry.path();
+                                            if path.extension().and_then(|ext| ext.to_str())
+                                                == Some("vtu")
+                                            {
+                                                vtu_files.push(path);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 按数字顺序排序（确保时间顺序正确）
+                                vtu_files.sort_by(|a, b| {
+                                    // 提取文件名中的数字部分进行比较
+                                    let extract_number = |path: &std::path::Path| -> Option<u32> {
+                                        let file_stem = path.file_stem()?.to_str()?;
+                                        // 寻找最后一个下划线后的数字
+                                        if let Some(pos) = file_stem.rfind('_') {
+                                            file_stem[pos + 1..].parse().ok()
+                                        } else {
+                                            // 如果没有下划线，尝试解析整个文件名为数字
+                                            file_stem.parse().ok()
+                                        }
+                                    };
+
+                                    match (extract_number(a), extract_number(b)) {
+                                        (Some(num_a), Some(num_b)) => num_a.cmp(&num_b),
+                                        (Some(_), None) => std::cmp::Ordering::Less,
+                                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                                        (None, None) => a.cmp(b), // 回退到字符串比较
+                                    }
+                                });
+
+                                println!("Found {} VTU files in time series", vtu_files.len());
+                                if vtu_files.len() > 0 {
+                                    println!("First file: {}", vtu_files[0].display());
+                                    println!(
+                                        "Last file: {}",
+                                        vtu_files[vtu_files.len() - 1].display()
+                                    );
+                                }
+
+                                if !vtu_files.is_empty() {
+                                    // 通过文件系统传递时间序列文件列表
+                                    let temp_file =
+                                        std::env::temp_dir().join("pending_time_series.txt");
+                                    let file_list = vtu_files
+                                        .iter()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    if let Err(e) = std::fs::write(&temp_file, file_list) {
+                                        eprintln!("Failed to write pending time series: {}", e);
+                                    }
+                                } else {
+                                    eprintln!("No VTU files found in selected folder");
+                                }
+                            }
+                        });
+                    }
+
+                    ui.separator();
+
                     if ui.button("Quit").clicked() {
                         std::process::exit(0);
                     }
@@ -132,6 +215,20 @@ fn initialize_ui_systems(
 
                     if ui.button("Clear User Meshes (Delete)").clicked() {
                         clear_events.send(events::ClearAllMeshesEvent);
+                    }
+
+                    ui.separator();
+
+                    // 调试信息
+                    ui.label("Debug Info:");
+                    ui.label(format!("Time series loaded: {}", animation_asset.is_loaded));
+                    if animation_asset.is_loaded {
+                        ui.label("(Single file mode - like normal import)");
+                        if let Some(mesh_entity) = animation_asset.mesh_entity {
+                            ui.label(format!("Mesh entity: {:?}", mesh_entity));
+                        } else {
+                            ui.label("No mesh entity");
+                        }
                     }
                 });
 
@@ -165,7 +262,27 @@ fn initialize_ui_systems(
 
         // 在TopBottomPanel之后立即显示SidePanel，确保正确的布局顺序
         if color_bar_config.visible {
-            color_bar::render_color_bar_inline(contexts, color_bar_config);
+            color_bar::render_color_bar_inline(&mut contexts, color_bar_config);
+        }
+
+        // 添加时间序列状态面板（简化版）
+        if animation_asset.is_loaded {
+            egui::TopBottomPanel::bottom("time_series_status")
+                .resizable(false)
+                .min_height(50.0)
+                .show(contexts.ctx_mut(), |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Time Series Loaded (Single File Mode)");
+                        ui.label("This works just like importing a single VTU file.");
+                        if let Some(current_data) = animation_asset.get_current_time_step_data() {
+                            if let Some(file_name) = current_data.file_path.file_name() {
+                                if let Some(name_str) = file_name.to_str() {
+                                    ui.label(format!("File: {}", name_str));
+                                }
+                            }
+                        }
+                    });
+                });
         }
     }
 }
@@ -657,9 +774,12 @@ fn handle_clear_all_meshes(
 }
 
 /// 检查是否有待处理的文件加载请求
-fn check_pending_file_load(mut load_events: EventWriter<events::LoadModelEvent>) {
+fn check_pending_file_load(
+    mut load_events: EventWriter<events::LoadModelEvent>,
+    mut time_series_events: EventWriter<TimeSeriesEvent>,
+) {
+    // 检查普通文件加载
     let temp_file = std::env::temp_dir().join("pending_file_load.txt");
-
     if temp_file.exists() {
         if let Ok(file_path_str) = std::fs::read_to_string(&temp_file) {
             let file_path = PathBuf::from(file_path_str.trim());
@@ -671,8 +791,30 @@ fn check_pending_file_load(mut load_events: EventWriter<events::LoadModelEvent>)
                 load_events.send(events::LoadModelEvent(file_path));
             }
         }
-
-        // 清理临时文件
         let _ = std::fs::remove_file(&temp_file);
+    }
+
+    // 检查时间序列文件加载
+    let time_series_file = std::env::temp_dir().join("pending_time_series.txt");
+    if time_series_file.exists() {
+        if let Ok(file_list_str) = std::fs::read_to_string(&time_series_file) {
+            let file_paths: Vec<PathBuf> = file_list_str
+                .lines()
+                .filter_map(|line| {
+                    let path = PathBuf::from(line.trim());
+                    if path.exists() {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !file_paths.is_empty() {
+                println!("Loading time series with {} files", file_paths.len());
+                time_series_events.send(TimeSeriesEvent::LoadSeries(file_paths));
+            }
+        }
+        let _ = std::fs::remove_file(&time_series_file);
     }
 }
