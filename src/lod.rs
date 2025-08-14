@@ -26,8 +26,8 @@ impl LODLevel {
     /// 获取切换距离阈值
     pub fn distance_threshold(self) -> f32 {
         match self {
-            LODLevel::LOD0 => 15.0,     // 近距离使用原始精度
-            LODLevel::LOD1 => 50.0,     // 中远距离使用简化精度
+            LODLevel::LOD0 => 8.0,      // 近距离使用原始精度 (从3.0提高到8.0)
+            LODLevel::LOD1 => 15.0,     // 中远距离使用简化精度 (从8.0提高到15.0)
             LODLevel::LOD2 => f32::MAX, // 最远距离使用最简化精度
         }
     }
@@ -141,8 +141,14 @@ impl LODManager {
 
     /// 根据距离选择合适的LOD级别
     pub fn select_lod_by_distance(&self, distance: f32) -> LODLevel {
-        // 根据模型大小调整距离阈值
-        let size_factor = (self.model_size / 10.0).max(1.0);
+        // 根据模型大小调整距离阈值，对小模型使用更小的因子
+        let size_factor = if self.model_size < 5.0 {
+            // 小模型（如bunny）使用更小的距离因子
+            (self.model_size / 5.0).max(0.3)
+        } else {
+            // 大模型保持原有逻辑
+            (self.model_size / 10.0).max(1.0)
+        };
 
         for level in LODLevel::all_levels() {
             if self.lod_meshes.contains_key(&level) {
@@ -163,9 +169,22 @@ impl LODManager {
         if new_lod != self.current_lod {
             self.current_lod = new_lod;
             self.needs_update = true;
+            
+            // 计算实际使用的距离阈值用于调试
+            let size_factor = if self.model_size < 5.0 {
+                (self.model_size / 5.0).max(0.3)
+            } else {
+                (self.model_size / 10.0).max(1.0)
+            };
+            
             println!(
-                "LOD change to {:?}，distance: {:.2}",
-                new_lod, camera_distance
+                "LOD切换到 {:?}，距离: {:.2}，模型大小: {:.2}，大小因子: {:.2}，LOD0阈值: {:.2}，LOD1阈值: {:.2}",
+                new_lod, 
+                camera_distance, 
+                self.model_size,
+                size_factor,
+                LODLevel::LOD0.distance_threshold() * size_factor,
+                LODLevel::LOD1.distance_threshold() * size_factor
             );
             true
         } else {
@@ -384,6 +403,8 @@ struct QEMMesh {
     triangles: Vec<QEMTriangle>,
     #[allow(dead_code)]
     vertex_mapping: HashMap<usize, usize>, // 原始顶点索引 -> QEM顶点索引
+    // 保存原始几何数据的Cell属性
+    original_cell_attributes: Option<HashMap<(String, crate::mesh::vtk::AttributeLocation), crate::mesh::vtk::AttributeType>>,
 }
 
 /// QEM顶点
@@ -573,11 +594,29 @@ impl QEMMesh {
         // 更新顶点的边连接
         Self::update_vertex_edges(&mut vertices, &edges);
 
+        // 保存原始Cell属性
+        let original_cell_attributes = if let Some(ref attrs) = geometry.attributes {
+            let mut cell_attrs = HashMap::new();
+            for ((name, location), attr_type) in attrs {
+                if let crate::mesh::vtk::AttributeLocation::Cell = location {
+                    cell_attrs.insert((name.clone(), location.clone()), attr_type.clone());
+                }
+            }
+            if cell_attrs.is_empty() {
+                None
+            } else {
+                Some(cell_attrs)
+            }
+        } else {
+            None
+        };
+
         QEMMesh {
             vertices,
             edges,
             triangles,
             vertex_mapping,
+            original_cell_attributes,
         }
     }
 
@@ -934,6 +973,9 @@ impl QEMMesh {
 
         // 收集有效三角形
         let mut new_indices = Vec::new();
+        let mut triangle_to_cell_mapping = Vec::new();
+        let mut cell_index = 0;
+        
         for triangle in &self.triangles {
             if triangle.is_deleted {
                 continue;
@@ -946,13 +988,21 @@ impl QEMMesh {
                 vertex_map.get(&v2),
             ) {
                 new_indices.extend_from_slice(&[new_v0, new_v1, new_v2]);
+                // 为每个新三角形分配一个cell索引
+                triangle_to_cell_mapping.push(cell_index);
+                cell_index += 1;
             }
         }
 
         // 重建属性
         let new_attributes = self.rebuild_attributes(&vertex_map, new_vertices.len())?;
 
-        Ok(GeometryData::new(new_vertices, new_indices, new_attributes))
+        let mut geometry = GeometryData::new(new_vertices, new_indices, new_attributes);
+        
+        // 添加三角形到cell的映射
+        geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
+
+        Ok(geometry)
     }
 
     fn rebuild_attributes(
@@ -1024,6 +1074,40 @@ impl QEMMesh {
 
             let attr = crate::mesh::vtk::AttributeType::Vector(data);
             new_attrs.insert((name, crate::mesh::vtk::AttributeLocation::Point), attr);
+        }
+
+        // 重建Cell属性（处理原始的Cell属性）
+        if let Some(ref original_cell_attrs) = self.original_cell_attributes {
+            for ((name, location), attr_type) in original_cell_attrs {
+                let new_triangle_count = self.triangles.iter().filter(|t| !t.is_deleted).count();
+                
+                match attr_type {
+                    crate::mesh::vtk::AttributeType::Scalar { table_name, .. } => {
+                        // 为简化后的每个Cell（三角形）分配相同的标量值
+                        // 这里使用第一个有效Cell的值作为所有简化Cell的值
+                        let mut cell_data = vec![1.0; new_triangle_count]; // 默认值
+                        
+                        if let crate::mesh::vtk::AttributeType::Scalar { data: original_data, .. } = attr_type {
+                            if !original_data.is_empty() {
+                                let default_value = original_data[0]; // 使用第一个值
+                                cell_data.fill(default_value);
+                                println!("重建Cell属性 '{}': {} 个Cell，值={}", name, new_triangle_count, default_value);
+                            }
+                        }
+
+                        let new_attr = crate::mesh::vtk::AttributeType::Scalar {
+                            num_comp: 1,
+                            table_name: table_name.clone(),
+                            data: cell_data,
+                            lookup_table: None,
+                        };
+                        new_attrs.insert((name.clone(), location.clone()), new_attr);
+                    }
+                    _ => {
+                        // 可以扩展支持其他Cell属性类型
+                    }
+                }
+            }
         }
 
         Ok(new_attrs)
