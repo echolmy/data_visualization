@@ -26,8 +26,8 @@ impl LODLevel {
     /// 获取切换距离阈值
     pub fn distance_threshold(self) -> f32 {
         match self {
-            LODLevel::LOD0 => 8.0,      // 近距离使用原始精度 (从3.0提高到8.0)
-            LODLevel::LOD1 => 15.0,     // 中远距离使用简化精度 (从8.0提高到15.0)
+            LODLevel::LOD0 => 15.0,      // 近距离使用原始精度 
+            LODLevel::LOD1 => 30.0,     // 中远距离使用简化精度 
             LODLevel::LOD2 => f32::MAX, // 最远距离使用最简化精度
         }
     }
