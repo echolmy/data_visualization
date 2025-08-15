@@ -1,231 +1,216 @@
-# 数据可视化工具
+# Scientific Data Visualization Tool
 
-基于 Rust 和 Bevy 引擎构建的科学数据可视化工具，专门用于三维科学数据的可视化，特别是对 VTK（Visualization Toolkit）格式文件的处理和展示。
+A high-performance scientific data visualization application built with Rust and the Bevy engine, specifically designed for 3D scientific data visualization with specialized support for VTK (Visualization Toolkit) format files.
 
-## 核心特性
+## Key Features
 
-### 文件格式支持
-- **VTK 文件格式**：完整支持 VTK Legacy 和 XML 格式文件的导入和解析
-  - Legacy: `.vtk`, `.vtu` - 支持非结构化网格和多边形数据
-  - XML: `.vtp`, `.vts`, `.vtr`, `.vti` - 开发中，部分格式支持
-- **OBJ 格式**：支持标准 OBJ 3D 模型文件
-- **多种数据类型**：
-  - 非结构化网格（Unstructured Grid）
-  - 多边形数据（PolyData）
+### File Format Support
+- **VTK File Formats**: Complete support for VTK Legacy and XML format file import and parsing
+  - Legacy: `.vtk`, `.vtu` - Support for unstructured grids and polygon data
+  - XML: `.vtp`, `.vts`, `.vtr`, `.vti` - In development, partial format support
+- **OBJ Format**: Support for standard OBJ 3D model files
+- **Multiple Data Types**:
+  - Unstructured Grid
+  - PolyData (Polygon Data)
 
-### 时间序列动画系统
-- **时间序列导入**：支持导入多个时间步的VTK文件作为动画序列
-- **自动排序**：智能识别文件名中的时间步编号并自动排序
-- **双步骤加载**：
-  - 第一步：导入第0帧作为静态模型
-  - 第二步：加载所有时间步的标量数据
-- **实时动画播放**：支持播放/暂停、时间步控制
-- **标量数据动画**：支持基于时间序列的标量属性动画
+### Time Series Animation System
+- **Time Series Import**: Support for importing multiple time-step VTK files as animation sequences
+- **Automatic Sorting**: Intelligent recognition and automatic sorting of time-step numbers in filenames
+- **Two-Stage Loading**:
+  - Stage 1: Import frame 0 as static model
+  - Stage 2: Load scalar data for all time steps
+- **Real-time Animation Playback**: Support for play/pause and time-step control
+- **Scalar Data Animation**: Support for time-series based scalar attribute animation
 
-### 网格处理功能
-- **智能三角化**：自动将复杂多边形和多面体单元转换为三角形
-- **网格细分**：支持三角网格细分，提供更高的网格密度
-- **LOD系统**：自动生成多级细节层次（Level of Detail）
-  - 支持基于距离的自动LOD切换
-  - 保持颜色映射在不同LOD级别间的一致性
+### Mesh Processing Capabilities
+- **Triangulation**: Automatic conversion of complex polygons and polyhedral cells to triangles
+- **Mesh Subdivision**: Support for triangle mesh subdivision with higher mesh density
+- **LOD System**: Automatic generation of multiple Level of Detail (LOD) levels
+  - Support for distance-based automatic LOD switching
+  - Maintains color mapping consistency across different LOD levels
 
-### 可视化渲染
-- **3D 网格渲染**：支持三角化网格和各种单元拓扑的可视化
-- **线框模式**：可在实体和线框渲染模式之间切换（快捷键：Z）
-- **颜色标量映射**：支持基于标量数据的网格着色
-- **多种颜色映射表**：
-  - 默认彩虹色映射
-  - 热力图映射
-  - Viridis 映射
-  - 高分辨率彩虹映射
-- **自动颜色范围**：根据数据自动调整颜色映射范围
-- **实时颜色更新**：支持实时更新网格颜色映射
+### Visualization Rendering
+- **3D Mesh Rendering**: Support for triangulated mesh and various cell topology visualization
+- **Wireframe Mode**: Toggle between solid and wireframe rendering modes (Hotkey: Z)
+- **Color Scalar Mapping**: Support for mesh coloring based on scalar data
+- **Multiple Color Maps**:
+  - Default rainbow color mapping
+  - Heat map mapping
+  - Viridis mapping
+  - High-resolution rainbow mapping
+- **Automatic Color Range**: Automatic adjustment of color mapping range based on data
+- **Real-time Color Updates**: Support for real-time mesh color mapping updates
 
-### 动态效果
-- **CPU 波浪生成**：生成数学波浪表面，支持实时参数调整
-- **GPU 着色器波浪**：使用 GPU 着色器实现高性能动态波浪效果
-- **实时动画**：时间驱动的波浪动画效果
+### Dynamic Effects
+- **CPU Wave Generation**: Generate mathematical wave surfaces with real-time parameter adjustment
+- **GPU Shader Waves**: High-performance dynamic wave effects using GPU shaders
+- **Real-time Animation**: Time-driven wave animation effects
 
-### 交互式相机系统
-- **自由飞行相机**：完整的 3D 相机控制系统
-- **鼠标控制**：
-  - 右键拖拽：旋转视角
-  - 鼠标滚轮：缩放
-  - 左键拖拽：平移视图
-- **相机控制**：
-  - W/A/S/D：前后左右移动
-  - Q/E：上下移动  
-  - 方向键：备用移动控制
-  - R：重置相机到默认位置
-  - **Shift + W/A/S/D/Q/E：快速移动（10倍速度）**
-- **模型变换**：
-  - **Alt + 鼠标左键拖拽：旋转模型**
-  - **Alt + 鼠标中键拖拽：平移模型位置**
-  - **Alt + R：重置模型变换**
-- **智能对焦**：自动调整相机位置以适应加载的模型
+### Interactive Camera System
+- **Free-Flight Camera**: Complete 3D camera control system
+- **Mouse Controls**:
+  - Right-click drag: Rotate view
+  - Mouse wheel: Zoom
+  - Left-click drag: Pan view
+- **Camera Movement**:
+  - W/A/S/D: Forward/backward/left/right movement
+  - Q/E: Up/down movement
+  - Arrow keys: Alternative movement controls
+  - R: Reset camera to default position
+  - **Shift + W/A/S/D/Q/E: Fast movement (10x speed)**
+- **Model Transformation**:
+  - **Alt + Left mouse drag: Rotate model**
+  - **Alt + Middle mouse drag: Translate model position**
+  - **Alt + R: Reset model transformation**
+- **Smart Focus**: Automatically adjust camera position to fit loaded models
 
-### 用户界面
-- **现代 GUI**：基于 egui 的直观用户界面
-- **菜单系统**：
-  - File 菜单：文件导入、时间序列导入和退出
-  - View 菜单：渲染模式切换、清除网格
-  - Mesh 菜单：网格细分、波浪生成
-- **时间序列控制面板**：
-  - 播放/暂停控制
-  - 时间步滑条
-  - 当前文件显示
-  - 加载状态显示
-- **颜色条配置**：实时调整颜色映射参数
-- **键盘快捷键**：
-  - Delete：清除所有用户导入的网格
-  - Z：切换线框模式
-  - R：重置相机位置
-  - Shift：配合WASD进行快速移动
-  - **Ctrl：进入模型变换模式**
-    - Ctrl + X/C/Y/H/Z/V：旋转模型
-    - Ctrl + +/-：缩放模型
-    - Ctrl + 方向键：平移模型
-    - Ctrl + 0：重置模型变换
+### User Interface
+- **Modern GUI**: Intuitive user interface based on egui
+- **Menu System**:
+  - File menu: File import, time series import, and exit
+  - View menu: Rendering mode toggle, clear meshes
+  - Mesh menu: Mesh subdivision, wave generation
+- **Time Series Control Panel**:
+  - Play/pause controls
+  - Time step slider
+  - Current file display
+  - Loading status indicator
+- **Color Bar Configuration**: Real-time color mapping parameter adjustment
 
-## 主要依赖
+## Main Dependencies
 
-- `bevy` (0.15.0) - 现代游戏引擎框架
-- `bevy_egui` (0.31.1) - GUI 集成库
-- `vtkio` (0.7.0-rc1) - VTK 文件格式支持
-- `rfd` (0.15.0) - 跨平台文件对话框
-- `bevy_obj` (0.15.0) - OBJ 文件格式支持
-- `bevy_atmosphere` (0.12.2) - 大气效果渲染
+- `bevy` (0.15.0) - Modern game engine framework
+- `bevy_egui` (0.31.1) - GUI integration library
+- `vtkio` (0.7.0-rc1) - VTK file format support
+- `rfd` (0.15.0) - Cross-platform file dialog
+- `bevy_obj` (0.15.0) - OBJ file format support
+- `bevy_atmosphere` (0.12.2) - Atmospheric effects rendering
 
-## 快速开始
+## Quick Start
 
-1. 克隆项目：
+1. Clone the repository:
 ```bash
 git clone [repository-url]
 cd data_visualization
 ```
 
-2. 构建并运行：
+2. Build and run:
 ```bash
 cargo run
 ```
 
-## 使用方法
+## Usage Guide
 
-### 基本操作
-1. **导入单个文件**：通过菜单栏 `File > Import` 导入 VTK 或 OBJ 文件
-2. **导入时间序列**：通过 `File > Import Time Series` 选择包含多个时间步文件的文件夹
-3. 使用鼠标控制相机：
-   - 右键拖拽：旋转视角
-   - 鼠标滚轮：缩放视图
-   - 左键拖拽：平移视图
-4. 通过 `View > Wireframe` 或按 Z 键切换渲染模式
+### Basic Operations
+1. **Import Single File**: Import VTK or OBJ files through menu `File > Import`
+2. **Import Time Series**: Select folder containing multiple time-step files through `File > Import Time Series`
+3. Toggle rendering mode through `View > Wireframe`
 
-### 时间序列动画
-1. 使用 `File > Import Time Series` 导入时间序列文件夹
-2. 系统会自动识别和排序时间步文件
-3. 使用时间序列控制面板：
-   - 点击播放/暂停按钮控制动画
-   - 拖拽时间步滑条跳转到特定时间
-   - 查看当前加载的文件信息
+### Time Series Animation
+1. Use `File > Import Time Series` to import time series folder
+2. System automatically recognizes and sorts time-step files
+3. Use time series control panel:
+   - Click play/pause button to control animation
+   - Drag time-step slider to jump to specific time
+   - View current loaded file information
 
-### 高级功能
-1. **网格细分**：在 `Mesh > Subdivide` 中对已加载的网格进行细分
-2. **波浪生成**：
-   - `Mesh > Create Wave Surface (CPU)`：生成 CPU 计算的波浪表面
-   - `Mesh > Create Wave Surface (GPU Shader)`：生成 GPU 着色器驱动的波浪表面
-3. **清除网格**：使用 `View > Clear User Meshes` 或按 Delete 键清除所有导入的网格
-4. **颜色映射调整**：通过颜色条面板实时调整颜色映射参数
+### Advanced Features
+1. **Mesh Subdivision**: Subdivide loaded meshes in `Mesh > Subdivide`
+2. **Wave Generation**:
+   - `Mesh > Create Wave Surface (CPU)`: Generate CPU-computed wave surface
+   - `Mesh > Create Wave Surface (GPU Shader)`: Generate GPU shader-driven wave surface
+3. **Color Mapping Adjustment**: Real-time adjustment of color mapping parameters through color bar panel
 
-### 简洁的控制系统
-本工具提供了直观的双重控制方式：
+### Intuitive Control System
+This tool provides intuitive dual control methods:
 
-#### 🎥 相机控制（改变观察角度）
-- **操作**：W/A/S/D移动，鼠标右键旋转，滚轮缩放
-- **效果**：你在3D空间中"飞行"查看模型
+#### Camera Control (Change Viewing Angle)
+- **Operation**: W/A/S/D movement, right mouse button rotation, wheel zoom
+- **Effect**: You "fly" through 3D space to view the model
 
-#### 🎭 模型变换（调整模型本身）
-- **操作**：Alt + 鼠标左键拖拽（旋转）、Alt + 鼠标中键拖拽（平移）
-- **效果**：调整模型位置和朝向，方便从各个角度观察
+#### Model Transformation (Adjust Model Itself)
+- **Operation**: Alt + Left mouse drag (rotation), Alt + Middle mouse drag (translation)
+- **Effect**: Adjust model position and orientation for observation from various angles
 
-**推荐使用**：两种方式结合使用，获得最佳观察体验
+**Recommended Usage**: Combine both methods for optimal viewing experience
 
-### 支持的文件格式
-- **VTK 文件**：`.vtk`, `.vtu` - 支持标量属性、颜色属性和向量属性
-- **OBJ 文件**：`.obj` - 标准 3D 模型文件
-- **时间序列**：支持按文件名自动排序的多时间步VTK文件
+### Supported File Formats
+- **VTK Files**: `.vtk`, `.vtu` - Support for scalar attributes, color attributes, and vector attributes
+- **OBJ Files**: `.obj` - Standard 3D model files
+- **Time Series**: Support for multi-time-step VTK files with automatic filename sorting
 
-### 大模型优化
-对于大型科学数据模型，系统提供了优化的导航体验：
-- **智能缩放**：滚轮缩放速度根据距离自动调整，距离越远缩放越快
-- **快速移动**：按住 Shift + WASD 进行10倍速快速移动
-- **自动对焦**：模型加载后自动调整相机到合适位置
-- **距离保护**：防止相机过近或过远造成的操作困难
-- **LOD系统**：自动简化远距离网格以提高性能
+### Large Model Optimization
+For large scientific data models, the system provides optimized navigation experience:
+- **Smart Zoom**: Wheel zoom speed automatically adjusts based on distance - faster zoom when farther away
+- **Fast Movement**: Hold Shift + WASD for 10x speed fast movement
+- **Auto Focus**: Automatically adjust camera to suitable position after model loading
+- **Distance Protection**: Prevent operation difficulties caused by camera being too near or far
+- **LOD System**: Automatically simplify distant meshes to improve performance
 
-## 项目结构
+## Project Structure
 
 ```
 src/
-├── main.rs              # 应用程序入口点
-├── animation.rs         # 时间序列动画系统
-├── mesh/                # 网格处理模块
-│   ├── vtk.rs          # VTK 文件解析和几何数据提取
-│   ├── subdivision.rs   # 网格细分算法
-│   ├── triangulation.rs # 三角化算法
-│   ├── color_maps.rs   # 颜色映射表
-│   └── wave.rs         # 波浪表面生成
-├── ui/                  # 用户界面模块
-│   └── events.rs       # UI 事件系统
-├── camera.rs            # 相机控制系统
-├── lod.rs              # 细节层次(LOD)系统
-├── model_transform.rs   # 模型变换功能
-├── render/              # 渲染功能
-│   └── wave_material.rs # GPU 波浪着色器材质
-└── environment.rs       # 环境和光照设置
+├── main.rs              # Application entry point
+├── animation.rs         # Time series animation system
+├── mesh/                # Mesh processing modules
+│   ├── vtk.rs          # VTK file parsing and geometry data extraction
+│   ├── subdivision.rs   # Mesh subdivision algorithms
+│   ├── triangulation.rs # Triangulation algorithms
+│   ├── color_maps.rs   # Color mapping tables
+│   └── wave.rs         # Wave surface generation
+├── ui/                  # User interface modules
+│   └── events.rs       # UI event system
+├── camera.rs            # Camera control system
+├── lod.rs              # Level of Detail (LOD) system
+├── model_transform.rs   # Model transformation functionality
+├── render/              # Rendering functionality
+│   └── wave_material.rs # GPU wave shader material
+└── environment.rs       # Environment and lighting setup
 ```
 
-## 技术特点
+## Technical Features
 
-- **高性能渲染**：基于 Bevy 引擎的现代渲染管线
-- **内存安全**：Rust 语言的内存安全保证
-- **模块化设计**：清晰的模块结构，易于扩展
-- **跨平台**：支持 Windows、macOS 和 Linux
-- **GPU 加速**：支持 GPU 着色器实现的动态效果
-- **事件驱动架构**：使用事件系统实现模块间通信
-- **智能内存管理**：自动优化大型数据集的内存使用
+- **High-Performance Rendering**: Modern rendering pipeline based on Bevy engine
+- **Memory Safety**: Memory safety guarantees from Rust language
+- **Modular Design**: Clear module structure, easy to extend
+- **Cross-Platform**: Support for Windows, macOS, and Linux
+- **GPU Acceleration**: Support for GPU shader-implemented dynamic effects
+- **Event-Driven Architecture**: Use event system for inter-module communication
+- **Smart Memory Management**: Automatic optimization of memory usage for large datasets
 
-## 开发状态
+## Development Status
 
-项目目前处于活跃开发阶段，核心功能已经实现：
+The project is currently in active development with core functionality implemented:
 
-### ✅ 已完成功能
-- VTK Legacy 格式完整支持
-- 时间序列动画系统
-- LOD 系统
-- 基础渲染和交互功能
-- 网格处理和细分
-- 颜色映射系统
+### Completed Features
+- Complete VTK Legacy format support
+- Time series animation system
+- LOD system
+- Basic rendering and interaction functionality
+- Mesh processing and subdivision
+- Color mapping system
 
-### 🚧 开发中功能
-- VTK XML 格式完整支持（.vtp, .vts, .vtr, .vti）
-- 更多颜色映射选项
-- 高级渲染效果
+### In Development
+- Complete VTK XML format support (.vtp, .vts, .vtr, .vti)
+- More color mapping options
+- Advanced rendering effects
 
-### 📋 计划功能
-- 体积渲染支持
-- 更多文件格式支持
-- 数据分析工具集成
+### Planned Features
+- Volume rendering support
+- More file format support
+- Data analysis tool integration
 
-## 构建发布版本
+## Building Release Version
 
-为获得最佳性能，请使用发布模式构建：
+For optimal performance, build in release mode:
 
 ```bash
 cargo build --release
 ```
 
-发布版本将提供：
-- 更快的渲染性能
-- 更低的内存占用
-- 更流畅的动画播放
-- 更好的大模型处理能力
+The release version provides:
+- Faster rendering performance
+- Lower memory usage
+- Smoother animation playback
+- Better large model processing capability
