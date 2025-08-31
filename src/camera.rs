@@ -31,14 +31,13 @@ use bevy::prelude::*;
 /// Camera movement speed (units per second)
 const MOVEMENT_SPEED: f32 = 5.0;
 /// Base zoom speed multiplier
-const BASE_ZOOM_SPEED: f32 = 100.0; // 大幅增加基础缩放速度
+const BASE_ZOOM_SPEED: f32 = 100.0;
 /// Camera distance factor for calculating appropriate viewing distance from models
-const CAMERA_DISTANCE_FACTOR: f32 = 2.0; // 减少距离因子，让相机更靠近模型
+const CAMERA_DISTANCE_FACTOR: f32 = 2.0;
 
 /// Component that marks the 3D world model camera
 ///
 /// This component is used to identify the main camera in the scene for rendering 3D models and scenes.
-/// It allows querying and manipulating specific camera entities within systems.
 #[derive(Debug, Component)]
 struct WorldModelCamera;
 
@@ -72,15 +71,15 @@ impl Default for CameraRotationController {
     /// Creates a default camera rotation controller
     ///
     /// Default configuration:
-    /// - Sensitivity: 0.01 (moderate mouse sensitivity)
-    /// - Initial angles: 0 (facing forward)
-    /// - Pitch limits: ±80 degrees (prevents gimbal lock)
+    /// - Sensitivity: 0.01
+    /// - Initial angles: 0
+    /// - Pitch limits: ±80 degrees
     fn default() -> Self {
         Self {
             sensitivity: 0.01,
             yaw: 0.0,
             pitch: 0.0,
-            max_pitch: std::f32::consts::FRAC_PI_2 * 0.9, // approximately 80 degrees
+            max_pitch: std::f32::consts::FRAC_PI_2 * 0.9,
             min_pitch: -std::f32::consts::FRAC_PI_2 * 0.9,
         }
     }
@@ -99,7 +98,7 @@ impl Plugin for CameraPlugin {
     ///
     /// # System Registration Order
     /// 1. Startup: Spawn camera
-    /// 2. Update: Camera control and model focusing (run in parallel)
+    /// 2. Update: Camera control and model focusing
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Update, camera_controller)
@@ -110,14 +109,14 @@ impl Plugin for CameraPlugin {
 /// Spawns the main camera in the scene
 ///
 /// Creates a 3D camera at scene startup with initial position and orientation:
-/// - Position: (10, 10, 10) - slightly elevated and away from origin
+/// - Position: (10, 10, 10)
 /// - Looking at: Scene origin (0, 0, 0)
 /// - Up direction: Positive Y-axis
 ///
 /// # Parameters
 /// * `commands` - Bevy's command buffer for spawning entities
 fn spawn_camera(mut commands: Commands) {
-    // Starting position: slightly elevated and back from the origin
+    // Initial camera position
     let camera_position = Vec3::new(10.0, 10.0, 10.0);
 
     // Look at the origin
@@ -132,10 +131,6 @@ fn spawn_camera(mut commands: Commands) {
 }
 
 /// Automatically adjusts camera focus to model when a model is loaded
-///
-/// Listens for `ModelLoadedEvent` events and automatically calculates appropriate
-/// camera position and orientation based on the model's position, size, and bounding box
-/// to ensure the model is fully visible.
 ///
 /// # Calculation Logic
 /// 1. Get the model's bounding box or estimate size using scale information
@@ -173,7 +168,7 @@ fn focus_camera_on_model(
                         diagonal, max_dimension
                     );
 
-                    // 确保最小尺寸，避免模型太小导致相机过近
+                    // Ensure a minimum size to avoid too close camera
                     let effective_size = max_dimension.max(0.1);
                     (effective_size, (min + max) / 2.0)
                 } else {
@@ -186,10 +181,9 @@ fn focus_camera_on_model(
             // Calculate appropriate camera distance (based on model size)
             let camera_distance = model_size * CAMERA_DISTANCE_FACTOR;
 
-            // 限制相机距离的范围，避免过近或过远
+            // constrain camera distance to avoid too close or too far
             let camera_distance = camera_distance.clamp(0.5, 100.0);
 
-            // Use elevated viewing angle
             let offset = Vec3::new(0.8, 1.2, 0.8).normalize() * camera_distance;
             let camera_position = model_center + offset;
 
@@ -224,16 +218,6 @@ fn focus_camera_on_model(
 /// - Scroll wheel: Forward/backward zoom
 /// - Right-click drag: Rotate view (yaw and pitch)
 ///
-/// ## Movement Calculation
-/// All movement is based on the camera's current orientation for intuitive control:
-/// - Forward/backward movement along camera's facing direction
-/// - Left/right movement perpendicular to camera's facing direction
-/// - Up/down movement along world Y-axis
-///
-/// ## Rotation Constraints
-/// - Pitch angle is constrained to ±80 degrees to prevent camera flipping
-/// - Yaw angle has no constraints, allowing 360-degree rotation
-///
 /// # Parameters
 /// * `keyboard_input` - Keyboard input state
 /// * `mouse_button_input` - Mouse button input state  
@@ -252,10 +236,10 @@ fn camera_controller(
     if let Ok((mut transform, mut rotation_controller)) = controller_query.get_single_mut() {
         let mut movement = Vec3::ZERO;
 
-        // 检查是否按住Shift键进行快速移动
+        // check if Shift key is pressed for fast movement
         let is_fast_mode = keyboard_input.pressed(KeyCode::ShiftLeft)
             || keyboard_input.pressed(KeyCode::ShiftRight);
-        let movement_multiplier = if is_fast_mode { 10.0 } else { 1.0 }; // 快速模式下移动速度x10
+        let movement_multiplier = if is_fast_mode { 10.0 } else { 1.0 };
 
         // Translation controls
         // Keyboard input
@@ -283,23 +267,20 @@ fn camera_controller(
             movement += transform.down() * MOVEMENT_SPEED * movement_multiplier;
         }
 
-        // Mouse scroll wheel zoom - 智能动态缩放
+        // Mouse scroll wheel zoom
         if accumulated_mouse_scroll.delta != Vec2::ZERO {
-            // 计算相机到原点的距离（假设模型在原点附近）
+            // Calculate distance from camera to origin (assuming model is near origin)
             let distance_to_origin = transform.translation.length();
 
-            // 基于距离的动态缩放速度：距离越远，缩放越快
-            // 最小速度为BASE_ZOOM_SPEED，随距离增加而增加
             let dynamic_zoom_speed = BASE_ZOOM_SPEED * (1.0 + distance_to_origin * 0.1);
 
-            // 也考虑滚轮滚动的幅度，支持快速连续滚动
+            // Also consider scroll wheel scroll amount for fast continuous scrolling
             let scroll_intensity = accumulated_mouse_scroll.delta.y.abs().max(1.0);
             let zoom_delta =
                 accumulated_mouse_scroll.delta.y * dynamic_zoom_speed * scroll_intensity;
 
             movement += transform.forward() * zoom_delta;
 
-            // 调试信息（可选）
             if accumulated_mouse_scroll.delta.y.abs() > 0.1 {
                 println!(
                     "Zoom: distance={:.1}, speed={:.1}, delta={:.1}",
@@ -308,12 +289,12 @@ fn camera_controller(
             }
         }
 
-        // 相机重置功能 - 按R键重置相机到默认位置
+        // Reset camera position - Press R to reset camera to default position
         if keyboard_input.just_pressed(KeyCode::KeyR) {
             transform.translation = Vec3::new(10.0, 10.0, 10.0);
             transform.look_at(Vec3::ZERO, Vec3::Y);
 
-            // 重置旋转控制器的角度
+            // Reset rotation controller angles
             let (pitch, yaw, _) = transform.rotation.to_euler(EulerRot::XYZ);
             rotation_controller.yaw = yaw;
             rotation_controller.pitch = pitch;

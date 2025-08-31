@@ -200,7 +200,7 @@ fn create_grid_mesh(size: f32, divisions: usize) -> Mesh {
 /// * `commands` - Mutable reference to Bevy's command system
 /// * `meshes` - Mutable reference to mesh asset manager
 /// * `materials` - Mutable reference to material asset manager
-/// * `direction` - Direction vector of the axis (typically Vec3::X, Vec3::Y, or Vec3::Z)
+/// * `direction` - Direction vector of the axis (Vec3::X, Vec3::Y, or Vec3::Z)
 /// * `color` - Color of the axis
 /// * `length` - Length of the axis
 ///
