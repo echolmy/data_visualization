@@ -29,7 +29,7 @@ impl Default for ColorBarConfig {
         Self {
             visible: true,
             color_map_name: "high_res_rainbow".to_string(),
-            min_value: 0.0,
+            min_value: -1.0,
             max_value: 1.0,
             title: "value".to_string(),
             unit: "".to_string(),
