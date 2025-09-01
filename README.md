@@ -8,7 +8,7 @@ A high-performance scientific data visualization application built with Rust and
 - **VTK File Formats**: Complete support for VTK Legacy and XML format file import and parsing
   - Legacy: `.vtk`, `.vtu` - Support for unstructured grids and polygon data
   - XML: `.vtp`, `.vts`, `.vtr`, `.vti` - In development
-- **Multiple Data Types**:
+- **Data Types**:
   - Unstructured Grid
   <!-- - PolyData -->
 
