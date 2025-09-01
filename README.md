@@ -10,7 +10,7 @@ A high-performance scientific data visualization application built with Rust and
   - XML: `.vtp`, `.vts`, `.vtr`, `.vti` - In development
 - **Multiple Data Types**:
   - Unstructured Grid
-  - PolyData
+  <!-- - PolyData -->
 
 ### Mesh Processing Capabilities
 - **Triangulation**: Automatic conversion of complex polygons and polyhedral cells to triangles
