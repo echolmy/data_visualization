@@ -171,11 +171,11 @@ src/
 ## Development Status
 
 The project is currently in active development.
-
+<!-- 
 ## Building Release Version
 
 For optimal performance, build in release mode:
 
 ```bash
 cargo build --release
-```
+``` -->
