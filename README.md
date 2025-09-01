@@ -12,15 +12,6 @@ A high-performance scientific data visualization application built with Rust and
   - Unstructured Grid
   - PolyData
 
-### Time Series Animation System
-- **Time Series Import**: Support for importing multiple time-step VTK files as animation sequences
-- **Two-Stage Loading**:
-  - Stage 1: Import frame 0 as static model
-  - Stage 2: Load scalar data for all time steps
-- **Real-time Animation Playback**: Support for play/pause and time-step control
-- **Scalar Data Animation**: Support for time-series based scalar attribute animation
-  - Note: Does not support mesh subdivision operations
-
 ### Mesh Processing Capabilities
 - **Triangulation**: Automatic conversion of complex polygons and polyhedral cells to triangles
 - **Mesh Subdivision**: Support for triangle mesh subdivision with higher mesh density
@@ -39,6 +30,15 @@ A high-performance scientific data visualization application built with Rust and
   - High-resolution rainbow mapping
 - **Real-time Color Updates**: Support for real-time mesh color mapping updates
 
+### Time Series Animation System
+- **Time Series Import**: Support for importing multiple time-step VTK files as animation sequences
+- **Two-Stage Loading**:
+  - Stage 1: Import frame 0 as static model
+  - Stage 2: Load scalar data for all time steps
+- **Real-time Animation Playback**: Support for play/pause and time-step control
+- **Scalar Data Animation**: Support for time-series based scalar attribute animation
+  - Note: Does not support mesh subdivision operations
+
 ### Dynamic Effects
 - **CPU Wave Generation**: Generate mathematical wave surfaces with real-time parameter adjustment
 - **GPU Shader Waves**: High-performance dynamic wave effects using GPU shaders
@@ -54,10 +54,10 @@ A high-performance scientific data visualization application built with Rust and
   - Q/E: Up/down movement
   - Arrow keys: Alternative movement controls
   - R: Reset camera to default position
-  - **Shift + W/A/S/D/Q/E: Fast movement (10x speed)**
+  - Shift + W/A/S/D/Q/E: Fast movement (10x speed)
 - **Model Transformation**:
-  - **Alt + Left mouse drag: Rotate model** (Windows/Linux) / **Option + Left mouse drag** (macOS)
-  - **Alt + Middle mouse drag: Translate model position** (Windows/Linux) / **Option + Middle mouse drag** (macOS)
+  - Alt + Left mouse drag: Rotate model** (Windows/Linux) / Option + Left mouse drag (macOS)
+  - Alt + Middle mouse drag: Translate model position** (Windows/Linux) / Option + Middle mouse drag (macOS)
 
 ### User Interface
 - **Modern GUI**: Intuitive user interface based on egui
