@@ -19,10 +19,12 @@ A high-performance scientific data visualization application built with Rust and
   - Stage 2: Load scalar data for all time steps
 - **Real-time Animation Playback**: Support for play/pause and time-step control
 - **Scalar Data Animation**: Support for time-series based scalar attribute animation
+  - Note: Does not support mesh subdivision operations
 
 ### Mesh Processing Capabilities
 - **Triangulation**: Automatic conversion of complex polygons and polyhedral cells to triangles
 - **Mesh Subdivision**: Support for triangle mesh subdivision with higher mesh density
+  - Note: Cannot be used with LOD system simultaneously
 - **LOD System**: Automatic generation of multiple Level of Detail (LOD) levels
   - Support for distance-based automatic LOD switching
 
