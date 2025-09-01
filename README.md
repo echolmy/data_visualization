@@ -83,6 +83,13 @@ A high-performance scientific data visualization application built with Rust and
 
 ## Quick Start
 
+### Prerequisites
+This application requires a Rust development environment. If you don't have Rust installed:
+
+1. Install Rust
+2. Verify installation: `rustc --version`
+
+### Running from Source
 1. Clone the repository:
 ```bash
 git clone [repository-url]
