@@ -56,8 +56,8 @@ A high-performance scientific data visualization application built with Rust and
   - R: Reset camera to default position
   - Shift + W/A/S/D/Q/E: Fast movement (10x speed)
 - **Model Transformation**:
-  - Alt + Left mouse drag: Rotate model** (Windows/Linux) / Option + Left mouse drag (macOS)
-  - Alt + Middle mouse drag: Translate model position** (Windows/Linux) / Option + Middle mouse drag (macOS)
+  - Alt + Left mouse drag: Rotate model (Windows/Linux) / Option + Left mouse drag (macOS)
+  - Alt + Middle mouse drag: Translate model position (Windows/Linux) / Option + Middle mouse drag (macOS)
 
 ### User Interface
 - **Modern GUI**: Intuitive user interface based on egui
