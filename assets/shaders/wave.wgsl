@@ -32,23 +32,23 @@ struct VertexOutput {
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
     
-    // 获取世界变换矩阵
+    // Get world transformation matrix
     let world_from_local = get_world_from_local(vertex.instance_index);
     
-    // 计算波形位移 - 与CPU版本保持一致
+    // Calculate wave displacement
     let time = material.time;
     let k = vec2<f32>(material.wave_vector_x, material.wave_vector_y);
     let phase_term = material.phase + dot(k, vertex.position.xz) - material.omega * time;
     let wave_height = material.amplitude * cos(phase_term);
     
-    // 应用波形位移到Y轴 - 直接设置高度（基础网格Y=0）
+    // Apply wave displacement to Y-axis - directly set height (base mesh Y=0)
     var displaced_position = vertex.position;
-    displaced_position.y = wave_height;  // 直接赋值，因为基础网格Y=0
+    displaced_position.y = wave_height;
     
-    // 转换到世界空间
+    // Transform to world space
     let world_position = world_from_local * vec4<f32>(displaced_position, 1.0);
     
-    // 转换到裁剪空间
+    // Transform to clip space
     out.clip_position = mesh_position_local_to_clip(
         world_from_local,
         vec4<f32>(displaced_position, 1.0),
@@ -69,12 +69,11 @@ struct FragmentInput {
 
 @fragment
 fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
-    // 基于波高创建颜色变化
-    let height_factor = (input.wave_height / material.amplitude + 1.0) * 0.5; // 归一化到0-1
+    // Create color variation based on wave height
+    let height_factor = (input.wave_height / material.amplitude + 1.0) * 0.5; // Normalize to 0-1
     
-    // 创建非常明显的颜色对比 - 使用基础色和它的补色
-    let valley_color = material.base_color * 0.2;                    // 波谷：很暗的基础色
-    let peak_color = vec3<f32>(1.0) - material.base_color * 0.5;     // 波峰：近似补色
+    let valley_color = material.base_color * 0.2;                    
+    let peak_color = vec3<f32>(1.0) - material.base_color * 0.5;     
     
     let final_color = mix(valley_color, peak_color, height_factor);
     

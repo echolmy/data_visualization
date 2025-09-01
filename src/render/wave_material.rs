@@ -1,8 +1,8 @@
 // src/mesh/wave_shader.rs
-//! GPU Shader 实现的波浪材质
+//! Wave material implementation using GPU shaders
 //!
-//! 使用顶点着色器在GPU上实时计算波形变形，
-//! 提供高性能的动态波浪效果。
+//! Uses vertex shaders to compute wave deformation in real-time on GPU,
+//! providing high-performance dynamic wave effects.
 #![allow(unused)]
 
 const SHADER_PATH: &str = "shaders/wave.wgsl";
@@ -16,7 +16,7 @@ use bevy::{
     },
 };
 
-/// 内部uniform数据结构，用于shader绑定
+/// Data structure for shader binding
 #[derive(Clone, ShaderType)]
 pub struct WaveUniformData {
     pub amplitude: f32,
@@ -26,15 +26,14 @@ pub struct WaveUniformData {
     pub omega: f32,
     pub time: f32,
     pub base_color: Vec3,
-    pub _padding: f32, // 确保内存对齐
+    pub _padding: f32, // Ensure memory alignment
 }
 
-/// 波浪材质结构体
+/// Wave material structure
 ///
-/// 包含所有传递给GPU shader的波浪参数
+/// Contains all wave parameters passed to GPU shader
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 pub struct WaveMaterial {
-    /// 所有波浪参数打包在一个uniform结构体中
     #[uniform(0)]
     pub data: WaveUniformData,
 }
@@ -63,7 +62,7 @@ impl WaveMaterial {
         }
     }
 
-    // 便于访问的getter和setter方法
+    // Getter and setter methods
     pub fn amplitude(&self) -> f32 {
         self.data.amplitude
     }
@@ -124,7 +123,7 @@ impl Default for WaveMaterial {
                 wave_vector_y: 0.3,
                 omega: 2.0,
                 time: 0.0,
-                base_color: Vec3::new(0.3, 0.5, 0.8), // 蓝色
+                base_color: Vec3::new(0.3, 0.5, 0.8), // Blue color
                 _padding: 0.0,
             },
         }
@@ -141,15 +140,15 @@ impl Material for WaveMaterial {
     }
 }
 
-/// 创建平面网格用于波浪渲染
+/// Create flat plane mesh for wave rendering
 ///
-/// # 参数
-/// - `width_resolution`: 宽度方向的顶点数量
-/// - `height_resolution`: 高度方向的顶点数量
-/// - `size`: 平面的物理尺寸
+/// # Parameters
+/// - `width_resolution`: Number of vertices in width direction
+/// - `height_resolution`: Number of vertices in height direction
+/// - `size`: Physical size of the plane
 ///
-/// # 返回值
-/// 返回生成的网格对象
+/// # Returns
+/// Returns the generated mesh object
 pub fn create_flat_plane_mesh(
     width_resolution: usize,
     height_resolution: usize,
@@ -164,7 +163,7 @@ pub fn create_flat_plane_mesh(
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
 
-    // 生成顶点
+    // Generate vertices
     for j in 0..height_resolution {
         for i in 0..width_resolution {
             let x = (i as f32 / (width_resolution - 1) as f32 - 0.5) * size.x;
@@ -178,17 +177,17 @@ pub fn create_flat_plane_mesh(
         }
     }
 
-    // 生成三角形索引
+    // Generate triangle indices
     for j in 0..(height_resolution - 1) {
         for i in 0..(width_resolution - 1) {
             let base = (j * width_resolution + i) as u32;
 
-            // 第一个三角形 (逆时针)
+            // First triangle (counter-clockwise)
             indices.push(base);
             indices.push(base + width_resolution as u32);
             indices.push(base + 1);
 
-            // 第二个三角形 (逆时针)
+            // Second triangle (counter-clockwise)
             indices.push(base + 1);
             indices.push(base + width_resolution as u32);
             indices.push(base + width_resolution as u32 + 1);
@@ -199,15 +198,16 @@ pub fn create_flat_plane_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
 
-    // 计算法线
+    // Calculate normals
     mesh.compute_smooth_normals();
 
     mesh
 }
 
-/// 动画系统：更新波浪材质的时间参数
+/// Animation system: Update wave material time parameters
 ///
-/// 该系统每帧更新所有波浪材质的时间参数，使波浪产生动画效果
+/// This system updates the time parameters for all wave materials each frame,
+/// creating animated wave effects
 pub fn animate_wave_shader(time: Res<Time>, mut wave_materials: ResMut<Assets<WaveMaterial>>) {
     let current_time = time.elapsed_secs();
 

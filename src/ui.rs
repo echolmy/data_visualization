@@ -5,15 +5,12 @@ use crate::mesh;
 use crate::mesh::vtk::VtkMeshExtractor;
 use bevy::prelude::*;
 use bevy_egui::*;
+pub use color_bar::ColorBarConfig;
 use rfd::FileDialog;
 use std::path::PathBuf;
 use vtkio;
 
-// 重新导出颜色条相关的公共接口
-pub use color_bar::ColorBarConfig;
-
-/// 标记组件，用于标识用户导入的模型网格
-/// 只有带有此组件的网格才会受到颜色映射的影响
+/// Marker component to identify imported models
 #[derive(Component)]
 pub struct UserModelMesh;
 
@@ -21,11 +18,11 @@ pub struct UserModelMesh;
 pub struct ModelLoadedEvent {
     pub position: Vec3,
     pub scale: Vec3,
-    pub bounds_min: Option<Vec3>, // 模型包围盒的最小点
-    pub bounds_max: Option<Vec3>, // 模型包围盒的最大点
+    pub bounds_min: Option<Vec3>, // Minimum point of model bounding box
+    pub bounds_max: Option<Vec3>, // Maximum point of model bounding box
 }
 
-// 存储当前模型的几何数据
+// Store current model's geometry data
 #[derive(Resource, Default)]
 pub struct CurrentModelData {
     pub geometry: Option<mesh::GeometryData>,
@@ -35,25 +32,27 @@ pub struct UIPlugin;
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<events::LoadModelEvent>()
-            .add_event::<events::ToggleWireframeEvent>() // register toggle wireframe event
-            .add_event::<events::SubdivideMeshEvent>() // register subdivide mesh event
-            .add_event::<events::GenerateWaveEvent>() // register generate wave event
-            .add_event::<events::GenerateWaveShaderEvent>() // register generate wave shader event
-            .add_event::<events::ClearAllMeshesEvent>() // register clear all meshes event
-            .add_event::<ModelLoadedEvent>() // register model loaded event
-            .init_resource::<CurrentModelData>() // register current model data resource
-            .init_resource::<ColorBarConfig>() // register color bar config resource
+            .add_event::<events::ToggleWireframeEvent>()
+            .add_event::<events::SubdivideMeshEvent>()
+            .add_event::<events::GenerateWaveEvent>()
+            .add_event::<events::GenerateWaveShaderEvent>()
+            .add_event::<events::ClearAllMeshesEvent>()
+            .add_event::<events::GenerateLODEvent>()
+            .add_event::<ModelLoadedEvent>()
+            .init_resource::<CurrentModelData>()
+            .init_resource::<ColorBarConfig>()
             .add_systems(
                 Update,
                 (
                     initialize_ui_systems,
-                    check_pending_file_load, // add pending file load check system
+                    check_pending_file_load,
                     load_resource,
-                    handle_subdivision,            // add handle subdivision system
-                    handle_wave_generation,        // add handle wave generation system
-                    handle_wave_shader_generation, // add handle wave shader generation system
-                    handle_clear_all_meshes,       // add handle clear all meshes system
-                    color_bar::apply_color_map_changes, // add color map change handling system
+                    handle_subdivision,
+                    handle_wave_generation,
+                    handle_wave_shader_generation,
+                    handle_clear_all_meshes,
+                    handle_lod_generation,
+                    color_bar::apply_color_map_changes,
                 )
                     .after(EguiSet::InitContexts),
             );
@@ -63,32 +62,33 @@ impl Plugin for UIPlugin {
 
 fn initialize_ui_systems(
     mut contexts: EguiContexts,
-    keyboard_input: Res<ButtonInput<KeyCode>>, // 添加键盘输入
-    _load_events: EventWriter<events::LoadModelEvent>, // 不再直接使用，通过临时文件传递
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    _load_events: EventWriter<events::LoadModelEvent>,
     mut wireframe_toggle_events: EventWriter<events::ToggleWireframeEvent>,
-    mut subdivide_events: EventWriter<events::SubdivideMeshEvent>, // 添加细分事件写入器
-    mut wave_events: EventWriter<events::GenerateWaveEvent>,       // 添加波形生成事件写入器
-    mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>, // 添加GPU shader波形生成事件写入器
-    mut clear_events: EventWriter<events::ClearAllMeshesEvent>, // 添加清除所有mesh事件写入器
-    mut time_series_events: EventWriter<TimeSeriesEvent>,       // 添加时间序列事件写入器
-    current_model: Res<CurrentModelData>,                       // 添加当前模型数据访问
-    animation_asset: Res<crate::animation::TimeSeriesAsset>,    // 添加动画资产访问
-    mut color_bar_config: ResMut<ColorBarConfig>,               // 添加颜色条配置访问
+    mut subdivide_events: EventWriter<events::SubdivideMeshEvent>,
+    mut wave_events: EventWriter<events::GenerateWaveEvent>,
+    mut wave_shader_events: EventWriter<events::GenerateWaveShaderEvent>,
+    mut clear_events: EventWriter<events::ClearAllMeshesEvent>,
+    mut lod_events: EventWriter<events::GenerateLODEvent>,
+    mut time_series_events: EventWriter<TimeSeriesEvent>,
+    current_model: Res<CurrentModelData>,
+    animation_asset: Res<crate::animation::TimeSeriesAsset>,
+    mut color_bar_config: ResMut<ColorBarConfig>,
     windows: Query<&Window>,
 ) {
-    // 处理键盘快捷键
+    // Handle keyboard shortcuts
     if keyboard_input.just_pressed(KeyCode::Delete) {
         clear_events.send(events::ClearAllMeshesEvent);
     }
 
-    // 只有在窗口存在时才访问egui上下文
+    // Only access egui context when window exists
     if windows.iter().next().is_some() {
         egui::TopBottomPanel::top("Menu Bar").show(contexts.ctx_mut(), |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
                 egui::menu::menu_button(ui, "File", |ui| {
                     if ui.button("Import").clicked() {
-                        // 使用异步文件对话框避免主线程阻塞
+                        // Use async file dialog to avoid main thread blocking
                         std::thread::spawn(move || {
                             if let Some(file) = FileDialog::new()
                                 .add_filter("model", &["obj", "glb", "vtk", "vtu"])
@@ -98,7 +98,7 @@ fn initialize_ui_systems(
                                 .pick_file()
                             {
                                 println!("Selected file: {}", file.display());
-                                // 通过文件系统传递路径（临时解决方案）
+
                                 let temp_file = std::env::temp_dir().join("pending_file_load.txt");
                                 if let Err(e) =
                                     std::fs::write(&temp_file, file.to_string_lossy().as_bytes())
@@ -112,7 +112,7 @@ fn initialize_ui_systems(
                     ui.separator();
 
                     if ui.button("Import Time Series").clicked() {
-                        // 选择时间序列文件夹
+                        // Select time series folder
                         std::thread::spawn(move || {
                             if let Some(folder) = FileDialog::new()
                                 .set_directory(
@@ -121,8 +121,8 @@ fn initialize_ui_systems(
                                 .pick_folder()
                             {
                                 println!("Selected time series folder: {}", folder.display());
-                                // 扫描文件夹中的 VTU 文件
-                                let mut vtu_files = Vec::new();
+                                // Scan VTK files in the folder
+                                let mut vtk_files = Vec::new();
                                 if let Ok(entries) = std::fs::read_dir(&folder) {
                                     for entry in entries {
                                         if let Ok(entry) = entry {
@@ -130,22 +130,22 @@ fn initialize_ui_systems(
                                             if path.extension().and_then(|ext| ext.to_str())
                                                 == Some("vtu")
                                             {
-                                                vtu_files.push(path);
+                                                vtk_files.push(path);
                                             }
                                         }
                                     }
                                 }
 
-                                // 按数字顺序排序（确保时间顺序正确）
-                                vtu_files.sort_by(|a, b| {
-                                    // 提取文件名中的数字部分进行比较
+                                // Sort by numerical order (ensure correct time sequence)
+                                vtk_files.sort_by(|a, b| {
+                                    // Extract numeric part from filename for comparison
                                     let extract_number = |path: &std::path::Path| -> Option<u32> {
                                         let file_stem = path.file_stem()?.to_str()?;
-                                        // 寻找最后一个下划线后的数字
+                                        // Find the number after the last underscore
                                         if let Some(pos) = file_stem.rfind('_') {
                                             file_stem[pos + 1..].parse().ok()
                                         } else {
-                                            // 如果没有下划线，尝试解析整个文件名为数字
+                                            // If no underscore, try to parse the whole filename as number
                                             file_stem.parse().ok()
                                         }
                                     };
@@ -154,24 +154,23 @@ fn initialize_ui_systems(
                                         (Some(num_a), Some(num_b)) => num_a.cmp(&num_b),
                                         (Some(_), None) => std::cmp::Ordering::Less,
                                         (None, Some(_)) => std::cmp::Ordering::Greater,
-                                        (None, None) => a.cmp(b), // 回退到字符串比较
+                                        (None, None) => a.cmp(b),
                                     }
                                 });
 
-                                println!("Found {} VTU files in time series", vtu_files.len());
-                                if vtu_files.len() > 0 {
-                                    println!("First file: {}", vtu_files[0].display());
+                                println!("Found {} VTK files in time series", vtk_files.len());
+                                if vtk_files.len() > 0 {
+                                    println!("First file: {}", vtk_files[0].display());
                                     println!(
                                         "Last file: {}",
-                                        vtu_files[vtu_files.len() - 1].display()
+                                        vtk_files[vtk_files.len() - 1].display()
                                     );
                                 }
 
-                                if !vtu_files.is_empty() {
-                                    // 通过文件系统传递时间序列文件列表
+                                if !vtk_files.is_empty() {
                                     let temp_file =
                                         std::env::temp_dir().join("pending_time_series.txt");
-                                    let file_list = vtu_files
+                                    let file_list = vtk_files
                                         .iter()
                                         .map(|p| p.to_string_lossy().to_string())
                                         .collect::<Vec<_>>()
@@ -180,7 +179,7 @@ fn initialize_ui_systems(
                                         eprintln!("Failed to write pending time series: {}", e);
                                     }
                                 } else {
-                                    eprintln!("No VTU files found in selected folder");
+                                    eprintln!("No VTK files found in selected folder");
                                 }
                             }
                         });
@@ -193,7 +192,7 @@ fn initialize_ui_systems(
                     }
                 });
 
-                // 添加View菜单
+                // Add View menu
                 egui::menu::menu_button(ui, "View", |ui| {
                     if ui.button("Wireframe").clicked() {
                         wireframe_toggle_events.send(events::ToggleWireframeEvent);
@@ -201,7 +200,7 @@ fn initialize_ui_systems(
 
                     ui.separator();
 
-                    // 颜色条控制
+                    // Color bar control
                     let color_bar_text = if color_bar_config.visible {
                         "hide color bar"
                     } else {
@@ -219,27 +218,39 @@ fn initialize_ui_systems(
 
                     ui.separator();
 
-                    // 调试信息
+                    // Debug information
                     ui.label("Debug Info:");
-                    ui.label(format!("Time series loaded: {}", animation_asset.is_loaded));
-                    if animation_asset.is_loaded {
-                        ui.label("(Single file mode - like normal import)");
+                    if animation_asset.is_loaded && animation_asset.get_total_time_steps() > 1 {
+                        ui.label(format!(
+                            "Time series loaded: {} frames",
+                            animation_asset.get_total_time_steps()
+                        ));
                         if let Some(mesh_entity) = animation_asset.mesh_entity {
                             ui.label(format!("Mesh entity: {:?}", mesh_entity));
                         } else {
                             ui.label("No mesh entity");
                         }
+                    } else if animation_asset.is_loaded
+                        && animation_asset.get_total_time_steps() == 1
+                    {
+                        ui.label("Single file loaded (not a time series)");
+                    } else {
+                        ui.label("No time series loaded");
                     }
                 });
 
-                // 添加Mesh菜单
+                // Add Mesh menu
                 egui::menu::menu_button(ui, "Mesh", |ui| {
-                    // 细分选项 - 只要有模型就可以细分
+                    // Subdivision options
                     if current_model.geometry.is_some() {
-                        ui.label("Subdivision:");
+                        ui.label("Operations:");
 
                         if ui.button("Subdivide").clicked() {
                             subdivide_events.send(events::SubdivideMeshEvent);
+                        }
+
+                        if ui.button("Generate LOD").clicked() {
+                            lod_events.send(events::GenerateLODEvent);
                         }
                     } else {
                         ui.label("Load a model first");
@@ -247,7 +258,7 @@ fn initialize_ui_systems(
 
                     ui.separator();
 
-                    // 波形生成选项
+                    // Wave generation
                     ui.label("Generate:");
                     if ui.button("Create Wave Surface (CPU)").clicked() {
                         wave_events.send(events::GenerateWaveEvent);
@@ -260,19 +271,17 @@ fn initialize_ui_systems(
             });
         });
 
-        // 在TopBottomPanel之后立即显示SidePanel，确保正确的布局顺序
         if color_bar_config.visible {
             color_bar::render_color_bar_inline(&mut contexts, color_bar_config);
         }
 
-        // 添加时间序列动画控制面板
-        if animation_asset.is_loaded {
+        // Add time series animation control panel
+        if animation_asset.is_loaded && animation_asset.get_total_time_steps() > 1 {
             egui::TopBottomPanel::bottom("time_series_animation")
                 .resizable(false)
                 .min_height(120.0)
                 .show(contexts.ctx_mut(), |ui| {
                     ui.vertical(|ui| {
-                        // 标题和状态信息
                         ui.horizontal(|ui| {
                             ui.heading("Time Series Animation Control");
                             ui.separator();
@@ -285,11 +294,11 @@ fn initialize_ui_systems(
 
                         ui.separator();
 
-                        // 只有当第二步完成时才显示动画控制
+                        // Only show animation controls when step 2 is complete
                         if animation_asset.is_step2_complete {
-                            // 播放控制按钮
+                            // Playback control buttons
                             ui.horizontal(|ui| {
-                                // 播放/暂停按钮
+                                // Play/Pause button
                                 if animation_asset.is_playing {
                                     if ui.button("⏸ Pause").clicked() {
                                         time_series_events.send(TimeSeriesEvent::Pause);
@@ -300,14 +309,14 @@ fn initialize_ui_systems(
                                     }
                                 }
 
-                                // 停止按钮
+                                // Stop button
                                 if ui.button("⏹ Stop").clicked() {
                                     time_series_events.send(TimeSeriesEvent::Stop);
                                 }
 
                                 ui.separator();
 
-                                // 单步控制
+                                // Single step control
                                 if ui.button("⏮ Prev Frame").clicked() {
                                     time_series_events.send(TimeSeriesEvent::PrevTimeStep);
                                 }
@@ -317,7 +326,7 @@ fn initialize_ui_systems(
 
                                 ui.separator();
 
-                                // 循环播放切换
+                                // Loop playback toggle
                                 let loop_text = if animation_asset.loop_animation {
                                     "🔄 Loop On"
                                 } else {
@@ -328,7 +337,7 @@ fn initialize_ui_systems(
                                 }
                             });
 
-                            // 时间步进度条
+                            // Time step progress bar
                             ui.horizontal(|ui| {
                                 ui.label("Time Step:");
                                 let total_steps = animation_asset.get_total_time_steps();
@@ -352,7 +361,7 @@ fn initialize_ui_systems(
                                 ui.label(format!("{}/{}", current_step + 1, total_steps));
                             });
 
-                            // FPS控制
+                            // FPS control
                             ui.horizontal(|ui| {
                                 ui.label("Playback Speed:");
                                 let mut fps = animation_asset.fps;
@@ -368,7 +377,7 @@ fn initialize_ui_systems(
                                 }
                             });
 
-                            // 当前文件信息
+                            // Current file information
                             if let Some(current_data) = animation_asset.get_current_time_step_data()
                             {
                                 ui.horizontal(|ui| {
@@ -381,7 +390,7 @@ fn initialize_ui_systems(
                                 });
                             }
                         } else {
-                            // 第二步加载状态
+                            // Step 2 loading status
                             ui.horizontal(|ui| {
                                 ui.label("Status: Loading time series data...");
                                 ui.label(format!(
@@ -397,40 +406,34 @@ fn initialize_ui_systems(
     }
 }
 
-/// 加载并处理3D模型资源文件
-///
-/// # 参数
-/// * `commands` - Bevy命令系统，用于生成实体
-/// * `asset_server` - 资源服务器，用于加载资源
-/// * `meshes` - 网格资源管理器
-/// * `materials` - 材质资源管理器
-/// * `load_events` - 加载模型事件读取器
-/// * `model_loaded_events` - 模型加载完成事件写入器
-/// * `current_model` - 当前模型数据
-/// * `egui_context` - Egui上下文
-/// * `windows` - 窗口查询
-///
-/// # 功能
-/// * 支持加载OBJ和VTK格式的3D模型文件
-/// * 对于OBJ文件，直接通过资源服务器加载
-/// * 对于VTK文件，解析几何数据并创建可渲染的网格
-/// * 更新当前模型状态并发送加载完成事件
+// Load and process 3D model resource files
 fn load_resource(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut load_events: EventReader<events::LoadModelEvent>,
-    mut model_loaded_events: EventWriter<ModelLoadedEvent>, // 添加事件写入器
-    mut current_model: ResMut<CurrentModelData>,            // 添加当前模型数据
-    mut color_bar_config: ResMut<ColorBarConfig>,           // 添加颜色条配置
+    mut model_loaded_events: EventWriter<ModelLoadedEvent>,
+    mut current_model: ResMut<CurrentModelData>,
+    color_bar_config: ResMut<ColorBarConfig>,
     mut egui_context: EguiContexts,
     windows: Query<&Window>,
+    mesh_entities: Query<Entity, With<UserModelMesh>>,
 ) {
-    // 检查窗口是否存在
+    // Check if window exists
     let window_exists = windows.iter().next().is_some();
 
     for events::LoadModelEvent(path) in load_events.read() {
+        // Clear existing user models from scene before importing new model
+        let cleared_count =
+            clear_existing_models_silent(&mut commands, &mesh_entities, &mut current_model);
+        if cleared_count > 0 {
+            println!(
+                "Cleared {} existing models before importing new model",
+                cleared_count
+            );
+        }
+
         match path.extension().and_then(|ext| ext.to_str()) {
             Some("obj") => {
                 let position = Vec3::new(0.0, 0.5, 0.0);
@@ -440,18 +443,16 @@ fn load_resource(
                     Mesh3d(asset_server.load(format!("{}", path.to_string_lossy()))),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
-                        metallic: 0.2,                 // 轻微金属感，增强反射
-                        perceptual_roughness: 0.4,     // 略微光滑表面，更好的光照反应
-                        reflectance: 0.5,              // 适中反射率
-                        unlit: false,                  // 确保PBR光照开启
-                        alpha_mode: AlphaMode::Opaque, // 改为Opaque获得更好性能
+                        metallic: 0.2,
+                        perceptual_roughness: 0.4,
+                        reflectance: 0.5,
+                        unlit: false,
+                        alpha_mode: AlphaMode::Opaque,
                         ..default()
                     })),
                     Transform::from_translation(position).with_scale(scale),
                 ));
 
-                // 对于OBJ模型，我们无法直接获取包围盒，所以设置为None
-                // OBJ文件不保存几何数据到CurrentModelData
                 current_model.geometry = None;
 
                 model_loaded_events.send(ModelLoadedEvent {
@@ -464,7 +465,7 @@ fn load_resource(
             // VTK extension:
             // Legacy: .vtk
             Some("vtk" | "vtu") => {
-                // 1. 导入VTK文件
+                // 1. Import VTK file
                 let vtk = match vtkio::Vtk::import(PathBuf::from(format!(
                     "{}",
                     path.to_string_lossy()
@@ -481,12 +482,12 @@ fn load_resource(
                     }
                 };
 
-                // 打印VTK文件的基本信息
-                mesh::print_vtk_info(&vtk);
+                // Print VTK information
+                // mesh::print_vtk_info(&vtk);
 
-                // 2. 解析VTK文件获取几何数据
+                // 2. Parse VTK file to get geometry data
                 let geometry = match vtk.data {
-                    // 2.1 处理UnstructuredGrid
+                    // 2.1 Process UnstructuredGrid
                     vtkio::model::DataSet::UnstructuredGrid { meta: _, pieces } => {
                         let extractor = mesh::vtk::UnstructuredGridExtractor;
                         match extractor.process_legacy(pieces) {
@@ -497,7 +498,7 @@ fn load_resource(
                             }
                         }
                     }
-                    // 2.2 处理PolyData
+                    // 2.2 Process PolyData
                     vtkio::model::DataSet::PolyData { meta: _, pieces } => {
                         let extractor = mesh::vtk::PolyDataExtractor;
                         match extractor.process_legacy(pieces) {
@@ -508,7 +509,7 @@ fn load_resource(
                             }
                         }
                     }
-                    // 2.3 TODO: 支持其他数据类型
+                    // 2.3 TODO: Support other data types
                     _ => {
                         println!("Unsupported VTK data type");
                         continue;
@@ -520,19 +521,18 @@ fn load_resource(
                     &geometry.attributes
                 );
 
-                // 打印几何数据的基本信息
-                mesh::print_geometry_info(&geometry);
+                // Print geometry info for debugging
+                // mesh::print_geometry_info(&geometry);
 
-                // 3. 保存几何数据到CurrentModelData
+                // 3. Save geometry data to CurrentModelData
                 current_model.geometry = Some(geometry.clone());
 
-                // 自动更新颜色条数值范围
-                color_bar::update_color_bar_range_from_geometry(&geometry, &mut color_bar_config);
+                // color_bar::update_color_bar_range_from_geometry(&geometry, &mut color_bar_config);
 
-                // 4. 使用已解析的geometry直接创建可渲染的mesh
+                // 4. Use parsed geometry to directly create mesh
                 let mut mesh = mesh::create_mesh_from_geometry(&geometry);
 
-                // 5. 应用当前选择的颜色映射表（覆盖VTK文件中的默认颜色）
+                // 5. Apply selected color mapping
                 if let Err(e) =
                     color_bar::apply_custom_color_mapping(&geometry, &mut mesh, &color_bar_config)
                 {
@@ -542,7 +542,7 @@ fn load_resource(
                 let position = Vec3::new(0.0, 0.5, 0.0);
                 let scale = Vec3::ONE;
 
-                // 6. 计算模型包围盒
+                // 6. Calculate model bounding box
                 let mut bounds_min = None;
                 let mut bounds_max = None;
 
@@ -550,12 +550,12 @@ fn load_resource(
                     if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) =
                         positions
                     {
-                        // 7. 初始化包围盒
+                        // 7. Initialize bounding box
                         if !positions.is_empty() {
                             let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
                             let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
 
-                            // 8. 遍历所有顶点，更新包围盒
+                            // 8. Iterate through all vertices, update bounding box
                             for pos in positions {
                                 let pos_vec = Vec3::new(pos[0], pos[1], pos[2]);
                                 min = min.min(pos_vec);
@@ -570,28 +570,27 @@ fn load_resource(
                     }
                 }
 
-                // 9. 创建实体
+                // 9. Create entity
                 commands.spawn((
                     Mesh3d(meshes.add(mesh.clone())),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::srgb(1.0, 1.0, 1.0),
-                        metallic: 0.2,             // 轻微金属感，增强反射
-                        perceptual_roughness: 0.4, // 略微光滑表面，更好的光照反应
-                        reflectance: 0.5,          // 适中反射率
+                        metallic: 0.2,
+                        perceptual_roughness: 0.4,
+                        reflectance: 0.5,
                         cull_mode: None,
-                        unlit: false, // 启用PBR光照！
+                        unlit: false,
                         alpha_mode: AlphaMode::Opaque,
-                        // 启用顶点颜色混合，保持颜色映射功能
                         ..default()
                     })),
                     Transform::from_translation(position),
                     Visibility::Visible,
-                    UserModelMesh, // 标记为用户导入的模型网格
+                    UserModelMesh,
                 ));
 
                 println!("number of vertices: {:?}", mesh.count_vertices());
 
-                // 10. 发送模型加载完成事件，包含包围盒信息
+                // 10. Send model loaded complete event
                 model_loaded_events.send(ModelLoadedEvent {
                     position,
                     scale,
@@ -599,8 +598,8 @@ fn load_resource(
                     bounds_max,
                 });
             }
-            // XML: .vtp (多边形数据), .vts (结构网格),
-            //      .vtr (矩形网格), .vti (图像数据)
+            // XML: .vtp (polygon data), .vts (structured grid),
+            //      .vtr (rectilinear grid), .vti (image data)
             Some("vtp" | "vts" | "vtr" | "vti") => {
                 // 11. show the message that this format is not supported
                 if window_exists {
@@ -624,7 +623,7 @@ fn load_resource(
     }
 }
 
-/// 处理网格细分事件
+/// Handle mesh subdivision events
 fn handle_subdivision(
     _commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -632,7 +631,7 @@ fn handle_subdivision(
     mut subdivide_events: EventReader<events::SubdivideMeshEvent>,
     mut current_model: ResMut<CurrentModelData>,
     mut model_entities: Query<&mut Mesh3d, With<UserModelMesh>>,
-    color_bar_config: Res<ColorBarConfig>, // 添加颜色条配置访问
+    color_bar_config: Res<ColorBarConfig>,
     mut egui_context: EguiContexts,
     windows: Query<&Window>,
 ) {
@@ -642,10 +641,10 @@ fn handle_subdivision(
         if let Some(ref geometry) = current_model.geometry {
             match mesh::subdivision::subdivide_mesh(geometry) {
                 Ok(subdivided_geometry) => {
-                    // 使用通用的网格创建函数处理细分后的几何数据
+                    // Create subdivided geometry data
                     let mut new_mesh = mesh::create_mesh_from_geometry(&subdivided_geometry);
 
-                    // 应用当前选择的颜色映射表到细分后的网格
+                    // Apply currently selected color mapping to subdivided mesh
                     if let Err(e) = color_bar::apply_custom_color_mapping(
                         &subdivided_geometry,
                         &mut new_mesh,
@@ -654,7 +653,6 @@ fn handle_subdivision(
                         println!("Failed to apply color mapping to subdivided mesh: {:?}", e);
                     }
 
-                    // 找到用户模型实体并更新其mesh，应该总是只有一个
                     if let Ok(mut mesh3d) = model_entities.get_single_mut() {
                         *mesh3d = Mesh3d(meshes.add(new_mesh.clone()));
                         println!(
@@ -672,10 +670,10 @@ fn handle_subdivision(
                                 },
                             );
                         }
-                        return; // 早退出，不更新模型数据
+                        return;
                     }
 
-                    // 更新当前模型数据 - 细分后的网格仍然是线性网格，可以继续细分
+                    // Update current model data
                     current_model.geometry = Some(subdivided_geometry);
 
                     if window_exists {
@@ -707,7 +705,7 @@ fn handle_subdivision(
     }
 }
 
-/// 处理波形生成事件
+/// Handle wave generation
 fn handle_wave_generation(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -722,24 +720,24 @@ fn handle_wave_generation(
     let window_exists = windows.iter().next().is_some();
 
     for _wave_event in wave_events.read() {
-        // 创建默认波形参数
+        // Create default wave parameters
         let wave = PlaneWave::default();
 
-        // 生成波形网格
+        // Generate wave mesh
         let wave_mesh = generate_wave_surface(
-            &wave, 10.0, // 宽度
-            10.0, // 深度
-            50,   // 宽度分辨率
-            50,   // 深度分辨率
+            &wave, 10.0, // Width
+            10.0, // Depth
+            50,   // Width resolution
+            50,   // Depth resolution
         );
 
         let position = Vec3::new(0.0, 0.0, 0.0);
 
-        // 创建波形实体
+        // Create wave entity
         commands.spawn((
             Mesh3d(meshes.add(wave_mesh.clone())),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.2, 0.6, 1.0), // 蓝色，像水一样
+                base_color: Color::srgb(0.2, 0.6, 1.0),
                 metallic: 0.1,
                 perceptual_roughness: 0.3,
                 reflectance: 0.8,
@@ -751,7 +749,7 @@ fn handle_wave_generation(
             Visibility::Visible,
         ));
 
-        // 清除当前模型数据，因为这是新生成的波形
+        // Clear current model data
         current_model.geometry = None;
 
         println!(
@@ -772,7 +770,7 @@ fn handle_wave_generation(
     }
 }
 
-/// 处理GPU Shader波形生成事件
+/// Handle GPU Shader wave generation
 fn handle_wave_shader_generation(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -787,14 +785,14 @@ fn handle_wave_shader_generation(
     let window_exists = windows.iter().next().is_some();
 
     for _wave_shader_event in wave_shader_events.read() {
-        // 创建平面网格用于shader变形
+        // Create flat plane mesh for shader deformation
         let plane_mesh = create_flat_plane_mesh(
             50,                                // width resolution
             50,                                // height resolution
             bevy::math::Vec2::new(10.0, 10.0), // size
         );
 
-        // 创建波浪材质
+        // Create wave material
         let wave_material = WaveMaterial::new(
             1.0,
             0.0,
@@ -805,16 +803,16 @@ fn handle_wave_shader_generation(
             bevy::math::Vec3::new(0.2, 0.2, 0.8),
         );
 
-        let position = Vec3::new(0.0, 0.0, 0.0); // 放在原点位置
+        let position = Vec3::new(0.0, 0.0, 0.0);
 
-        // 创建使用shader材质的波形实体
+        // Create wave entity using shader material
         commands.spawn((
             Mesh3d(meshes.add(plane_mesh.clone())),
             MeshMaterial3d(wave_materials.add(wave_material)),
             Transform::from_translation(position),
         ));
 
-        // 清除当前模型数据，因为这是新生成的波形
+        // Clear current model data
         current_model.geometry = None;
 
         println!(
@@ -839,11 +837,30 @@ fn handle_wave_shader_generation(
     }
 }
 
-/// 处理清除所有mesh事件
+/// Clear existing models
+pub fn clear_existing_models_silent(
+    commands: &mut Commands,
+    mesh_entities: &Query<Entity, With<UserModelMesh>>,
+    current_model: &mut ResMut<CurrentModelData>,
+) -> usize {
+    let mesh_count = mesh_entities.iter().count();
+
+    if mesh_count > 0 {
+        // Iterate through all user imported mesh entities and delete them
+        for entity in mesh_entities.iter() {
+            commands.entity(entity).despawn();
+        }
+
+        // Clear current model data
+        current_model.geometry = None;
+    }
+
+    mesh_count
+}
+
 fn handle_clear_all_meshes(
     mut commands: Commands,
     mut clear_events: EventReader<events::ClearAllMeshesEvent>,
-    // 查询所有用户导入的网格实体
     mesh_entities: Query<Entity, With<UserModelMesh>>,
     mut current_model: ResMut<CurrentModelData>,
     mut egui_context: EguiContexts,
@@ -855,40 +872,107 @@ fn handle_clear_all_meshes(
         let mesh_count = mesh_entities.iter().count();
 
         if mesh_count > 0 {
-            // 遍历所有用户导入的mesh实体并删除它们（保留坐标系和网格）
             for entity in mesh_entities.iter() {
                 commands.entity(entity).despawn();
             }
 
-            // 清除当前模型数据
+            // Clear current model data
             current_model.geometry = None;
 
-            println!("清除了 {} 个用户mesh实体（保留坐标系和网格）", mesh_count);
+            println!("Cleared {} user mesh entities", mesh_count);
 
             if window_exists {
-                egui::Window::new("清除完成").show(egui_context.ctx_mut(), |ui| {
-                    ui.label(format!("成功清除了 {} 个mesh", mesh_count));
-                    ui.label("坐标系和网格已保留");
+                egui::Window::new("Clear Complete").show(egui_context.ctx_mut(), |ui| {
+                    ui.label(format!("Successfully cleared {} meshes", mesh_count));
                 });
             }
         } else {
-            println!("场景中没有用户mesh需要清除");
+            println!("No user meshes in scene to clear");
             if window_exists {
-                egui::Window::new("提示").show(egui_context.ctx_mut(), |ui| {
-                    ui.label("场景中没有用户mesh需要清除");
-                    ui.label("坐标系和网格将保持不变");
+                egui::Window::new("Notice").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("No user meshes in scene to clear");
                 });
             }
         }
     }
 }
 
-/// 检查是否有待处理的文件加载请求
+/// Handle LOD generation events
+fn handle_lod_generation(
+    mut commands: Commands,
+    mut lod_events: EventReader<events::GenerateLODEvent>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    current_model: Res<CurrentModelData>,
+    model_entities: Query<Entity, (With<UserModelMesh>, Without<crate::lod::LODManager>)>,
+    mut egui_context: EguiContexts,
+    windows: Query<&Window>,
+) {
+    let window_exists = windows.iter().next().is_some();
+
+    for _lod_event in lod_events.read() {
+        if let Some(ref geometry) = current_model.geometry {
+            // Add LOD manager to all user model entities
+            let mut entities_processed = 0;
+            for entity in model_entities.iter() {
+                match crate::lod::LODManager::new(geometry.clone(), &mut meshes) {
+                    Ok(lod_manager) => {
+                        commands.entity(entity).insert(lod_manager);
+                        entities_processed += 1;
+                        println!("Successfully created LOD manager for entity {:?}", entity);
+                    }
+                    Err(e) => {
+                        println!(
+                            "Failed to create LOD manager for entity {:?}: {:?}",
+                            entity, e
+                        );
+                    }
+                }
+            }
+
+            if entities_processed > 0 {
+                println!(
+                    "Successfully generated LOD for {} entities",
+                    entities_processed
+                );
+                if window_exists {
+                    egui::Window::new("LOD Generation Complete").show(
+                        egui_context.ctx_mut(),
+                        |ui| {
+                            ui.label(format!(
+                                "Successfully generated LOD for {} models",
+                                entities_processed
+                            ));
+                            ui.label("LOD will automatically switch based on camera distance");
+                        },
+                    );
+                }
+            } else {
+                println!("No model entities found that can generate LOD");
+                if window_exists {
+                    egui::Window::new("Notice").show(egui_context.ctx_mut(), |ui| {
+                        ui.label("No models found that can generate LOD");
+                        ui.label("Please import a model first, or LOD already exists");
+                    });
+                }
+            }
+        } else {
+            println!("Currently no geometry data, cannot generate LOD");
+            if window_exists {
+                egui::Window::new("Error").show(egui_context.ctx_mut(), |ui| {
+                    ui.label("Currently no model data");
+                    ui.label("Please import a VTK file first");
+                });
+            }
+        }
+    }
+}
+
+/// Check for pending file load requests
 fn check_pending_file_load(
     mut load_events: EventWriter<events::LoadModelEvent>,
     mut time_series_events: EventWriter<TimeSeriesEvent>,
 ) {
-    // 检查普通文件加载
+    // Check for regular file loading
     let temp_file = std::env::temp_dir().join("pending_file_load.txt");
     if temp_file.exists() {
         if let Ok(file_path_str) = std::fs::read_to_string(&temp_file) {
@@ -904,7 +988,7 @@ fn check_pending_file_load(
         let _ = std::fs::remove_file(&temp_file);
     }
 
-    // 检查时间序列文件加载
+    // Check for time series file loading
     let time_series_file = std::env::temp_dir().join("pending_time_series.txt");
     if time_series_file.exists() {
         if let Ok(file_list_str) = std::fs::read_to_string(&time_series_file) {

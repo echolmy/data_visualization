@@ -1,8 +1,3 @@
-// 在开发阶段允许未使用的代码和导入
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-
 use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::utils::HashMap;
@@ -15,37 +10,34 @@ use vtkio::*;
 // Definition of type of attributes
 #[derive(Debug, Clone)]
 pub enum AttributeType {
-    /// 标量属性 - 包含查找表支持
+    /// Scalar attribute
     Scalar {
         num_comp: usize,
         table_name: String,
         data: Vec<f32>,
         lookup_table: Option<Vec<[f32; 4]>>,
     },
-    /// 颜色标量属性
+    /// Color scalar attribute
     ColorScalar { nvalues: u32, data: Vec<Vec<f32>> },
-    /// 向量属性
+    /// Vector attribute
     Vector(Vec<[f32; 3]>),
-    /// 张量属性 - 保留用于将来扩展
+    /// Tensor attribute - reserved for future extension
     #[allow(dead_code)]
-    Tensor(Vec<[f32; 9]>), // 3x3张量矩阵
+    Tensor(Vec<[f32; 9]>), // 3x3 tensor matrix
 }
 
-/// VTK 属性位置定义
+/// VTK attribute location definition
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AttributeLocation {
-    Point, // 点属性
-    Cell,  // 单元格属性
+    Point, // Point attribute
+    Cell,  // Cell attribute
 }
 
 pub struct UnstructuredGridExtractor;
 pub struct PolyDataExtractor;
-pub struct StructuredGridExtractor;
-pub struct RectilinearGridExtractor;
-pub struct StructuredPointsExtractor;
 
-// GeometryData 的核心实现在 mesh.rs 中
-// 这里只提供 VTK 格式特定的扩展方法
+// Core implementation of GeometryData is in mesh.rs
+// Here only provides VTK format specific extension methods
 impl GeometryData {
     /// Apply point color scalars to a mesh.
     ///
@@ -203,10 +195,9 @@ impl GeometryData {
         // initialize color list for each vertex (white)
         let mut vertices_color = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
-        // 使用映射关系来确保正确映射
         if let Some(mapping) = &self.triangle_to_cell_mapping {
             for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
-                // 检查cell_idx是否有效
+                // Check if cell_idx is valid
                 if cell_idx >= data.len() {
                     println!(
                         "Warning: cell index {} exceeds color data range {}",
@@ -216,7 +207,7 @@ impl GeometryData {
                     continue;
                 }
 
-                // 获取这个三角形的三个顶点索引
+                // Get the three vertex indices of this triangle
                 let triangle_base = triangle_idx * 3;
                 if triangle_base + 2 >= self.indices.len() {
                     println!(
@@ -233,7 +224,7 @@ impl GeometryData {
                     self.indices[triangle_base + 2] as usize,
                 ];
 
-                // 获取对应单元格的颜色
+                // Get the color of the corresponding cell
                 let colors = &data[cell_idx];
                 let color = match nvalues {
                     3 => [colors[0], colors[1], colors[2], 1.0],
@@ -241,7 +232,7 @@ impl GeometryData {
                     _ => [1.0, 1.0, 1.0, 1.0], // default color white
                 };
 
-                // 设置顶点颜色
+                // Set vertex colors
                 for &idx in &vertex_indices {
                     if idx < vertices_color.len() {
                         vertices_color[idx] = color;
@@ -249,7 +240,7 @@ impl GeometryData {
                 }
             }
         } else {
-            // 回退到原始方法，按顺序一一对应 (旧代码保留为后备)
+            // Fall back to original method, one-to-one correspondence in order
             let num_triangles = self.indices.len() / 3;
             for triangle_idx in 0..num_triangles {
                 if triangle_idx >= data.len() {
@@ -261,14 +252,14 @@ impl GeometryData {
                     break;
                 }
 
-                // 获取这个三角形的三个顶点索引
+                // Get the three vertex indices of this triangle
                 let vertex_indices = [
                     self.indices[triangle_idx * 3] as usize,
                     self.indices[triangle_idx * 3 + 1] as usize,
                     self.indices[triangle_idx * 3 + 2] as usize,
                 ];
 
-                // 获取这个cell的颜色
+                // Get the color of this cell
                 let colors = &data[triangle_idx];
                 let color = match nvalues {
                     3 => [colors[0], colors[1], colors[2], 1.0],
@@ -276,7 +267,7 @@ impl GeometryData {
                     _ => [1.0, 1.0, 1.0, 1.0], // default color white
                 };
 
-                // 设置顶点颜色
+                // Set vertex colors
                 for &idx in &vertex_indices {
                     if idx < vertices_color.len() {
                         vertices_color[idx] = color;
@@ -297,7 +288,7 @@ impl GeometryData {
     /// or `Err(VtkError)` if there is no such attribute or if the attribute is not a `Scalar`.
     pub fn apply_scalar_attributes(&self, mesh: &mut Mesh) -> Result<(), VtkError> {
         if let Some(attributes) = &self.attributes {
-            // 首先处理点标量
+            // Process point scalars
             for ((name, location), attr) in attributes.iter() {
                 if let AttributeType::Scalar {
                     num_comp,
@@ -314,7 +305,7 @@ impl GeometryData {
 
                         let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
-                        // 计算最小最大值以进行归一化
+                        // Calculate min/max values for normalization
                         let min_val = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
                         let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
                         let range = max_val - min_val;
@@ -324,40 +315,35 @@ impl GeometryData {
                             min_val, max_val, range
                         );
 
-                        // 为每个顶点设置颜色
+                        // Set color for each vertex
                         for (i, &val) in data.iter().enumerate() {
                             if i < self.vertices.len() {
                                 let color = if range < 1e-10 {
-                                    // 当数据范围极小时（如理论解为常数的情况），使用颜色映射表的中间颜色
                                     if i == 0 {
                                         println!("Point data range is very small ({}), using middle color for constant value {} ", range, val);
                                     }
-                                    // 对于常数场，使用颜色映射表的中间颜色而不是根据值查找
                                     if let Some(lut) = lookup_table {
-                                        // 创建临时ColorMap并获取中间颜色
                                         let temp_color_map = color_maps::ColorMap {
                                             name: table_name.clone(),
                                             colors: lut.clone(),
                                         };
                                         temp_color_map.get_interpolated_color(0.5)
                                     } else {
-                                        // 使用默认的颜色映射的中间颜色
+                                        // Use default color mapping's middle color
                                         let color_map = color_maps::get_color_map(table_name);
                                         color_map.get_interpolated_color(0.5)
                                     }
                                 } else {
                                     let normalized = (val - min_val) / range;
 
-                                    // 使用ColorMap获取颜色（线性插值）
+                                    // Use ColorMap to get color
                                     if let Some(lut) = lookup_table {
-                                        // 创建临时ColorMap进行插值
                                         let temp_color_map = color_maps::ColorMap {
                                             name: table_name.clone(),
                                             colors: lut.clone(),
                                         };
                                         temp_color_map.get_interpolated_color(normalized)
                                     } else {
-                                        // 使用默认的颜色映射
                                         let color_map = color_maps::get_color_map(table_name);
                                         color_map.get_interpolated_color(normalized)
                                     }
@@ -374,7 +360,7 @@ impl GeometryData {
                             }
                         }
 
-                        // 插入颜色属性
+                        // Insert color attribute
                         mesh.insert_attribute(
                             Mesh::ATTRIBUTE_COLOR,
                             VertexAttributeValues::from(vertex_colors),
@@ -385,7 +371,7 @@ impl GeometryData {
                 }
             }
 
-            // 如果没有点标量，则处理单元格标量
+            // If no point scalars, then process cell scalars
             for ((name, location), attr) in attributes.iter() {
                 if let AttributeType::ColorScalar { nvalues, data } = attr {
                     if location == &AttributeLocation::Cell {
@@ -397,11 +383,11 @@ impl GeometryData {
 
                         let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
-                        // 使用映射关系
+                        // Use mapping relationship
                         if let Some(mapping) = &self.triangle_to_cell_mapping {
                             println!("Using triangle to cell mapping");
                             for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
-                                // 检查cell_idx是否有效
+                                // Check if cell_idx is valid
                                 if cell_idx >= data.len() {
                                     println!(
                                         "Warning: cell index {} exceeds color data range {}",
@@ -411,7 +397,7 @@ impl GeometryData {
                                     continue;
                                 }
 
-                                // 获取这个三角形的三个顶点索引
+                                // Get the three vertex indices of this triangle
                                 let triangle_base = triangle_idx * 3;
                                 if triangle_base + 2 >= self.indices.len() {
                                     println!(
@@ -428,7 +414,7 @@ impl GeometryData {
                                     self.indices[triangle_base + 2] as usize,
                                 ];
 
-                                // 获取对应单元格的颜色
+                                // Get the color of the corresponding cell
                                 let colors = &data[cell_idx];
                                 let color = match nvalues {
                                     3 => [colors[0], colors[1], colors[2], 1.0],
@@ -441,7 +427,7 @@ impl GeometryData {
                                     triangle_idx, cell_idx, color[0], color[1], color[2], color[3]
                                 );
 
-                                // 设置顶点颜色
+                                // Set vertex colors
                                 for &idx in &vertex_indices {
                                     if idx < vertex_colors.len() {
                                         vertex_colors[idx] = color;
@@ -450,7 +436,6 @@ impl GeometryData {
                             }
                         } else {
                             println!("No triangle to cell mapping, using default mapping");
-                            // 回退到原始方法，按顺序一一对应
                             let num_triangles = self.indices.len() / 3;
                             for triangle_idx in 0..num_triangles {
                                 if triangle_idx >= data.len() {
@@ -462,14 +447,14 @@ impl GeometryData {
                                     break;
                                 }
 
-                                // 获取这个三角形的三个顶点索引
+                                // Get the three vertex indices of this triangle
                                 let vertex_indices = [
                                     self.indices[triangle_idx * 3] as usize,
                                     self.indices[triangle_idx * 3 + 1] as usize,
                                     self.indices[triangle_idx * 3 + 2] as usize,
                                 ];
 
-                                // 获取这个cell的颜色
+                                // Get the color of this cell
                                 let colors = &data[triangle_idx];
                                 let color = match nvalues {
                                     3 => [colors[0], colors[1], colors[2], 1.0],
@@ -482,7 +467,7 @@ impl GeometryData {
                                     triangle_idx, color[0], color[1], color[2], color[3]
                                 );
 
-                                // 设置顶点颜色
+                                // Set vertex colors
                                 for &idx in &vertex_indices {
                                     if idx < vertex_colors.len() {
                                         vertex_colors[idx] = color;
@@ -491,7 +476,7 @@ impl GeometryData {
                             }
                         }
 
-                        // 插入颜色属性
+                        // Insert color attribute
                         mesh.insert_attribute(
                             Mesh::ATTRIBUTE_COLOR,
                             VertexAttributeValues::from(vertex_colors),
@@ -516,15 +501,15 @@ impl GeometryData {
 
                         let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; self.vertices.len()];
 
-                        // 计算最小最大值以进行归一化
+                        // Calculate min/max values for normalization
                         let min_val = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
                         let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
                         let range = max_val - min_val;
 
-                        // 使用映射关系
+                        // Use mapping relationship
                         if let Some(mapping) = &self.triangle_to_cell_mapping {
                             for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
-                                // 检查cell_idx是否有效
+                                // Check if cell_idx is valid
                                 if cell_idx >= data.len() {
                                     println!(
                                         "Warning: cell index {} exceeds scalar data range {}",
@@ -534,45 +519,40 @@ impl GeometryData {
                                     continue;
                                 }
 
-                                // 获取单元格的标量值并计算颜色
+                                // Get cell scalar value and calculate color
                                 let val = data[cell_idx];
                                 let color = if range < 1e-10 {
-                                    // 当数据范围极小时（如理论解为常数的情况），使用颜色映射表的中间颜色
                                     if triangle_idx == 0 {
                                         println!("Cell data range is very small ({}), using middle color for constant value {}", range, val);
                                     }
-                                    // 对于常数场，使用颜色映射表的中间颜色而不是根据值查找
                                     if let Some(lut) = lookup_table {
-                                        // 创建临时ColorMap并获取中间颜色
                                         let temp_color_map = color_maps::ColorMap {
                                             name: table_name.clone(),
                                             colors: lut.clone(),
                                         };
                                         temp_color_map.get_interpolated_color(0.5)
                                     } else {
-                                        // 使用默认的颜色映射的中间颜色
+                                        // Use default color mapping's middle color
                                         let color_map = color_maps::get_color_map(table_name);
                                         color_map.get_interpolated_color(0.5)
                                     }
                                 } else {
                                     let normalized = (val - min_val) / range;
 
-                                    // 使用ColorMap获取颜色（线性插值）
+                                    // Use ColorMap to get color
                                     if let Some(lut) = lookup_table {
-                                        // 创建临时ColorMap进行插值
                                         let temp_color_map = color_maps::ColorMap {
                                             name: table_name.clone(),
                                             colors: lut.clone(),
                                         };
                                         temp_color_map.get_interpolated_color(normalized)
                                     } else {
-                                        // 使用默认的颜色映射
                                         let color_map = color_maps::get_color_map(table_name);
                                         color_map.get_interpolated_color(normalized)
                                     }
                                 };
 
-                                // 获取这个三角形的三个顶点索引
+                                // Get the three vertex indices of this triangle
                                 let triangle_base = triangle_idx * 3;
                                 if triangle_base + 2 >= self.indices.len() {
                                     println!(
@@ -589,7 +569,7 @@ impl GeometryData {
                                     self.indices[triangle_base + 2] as usize,
                                 ];
 
-                                // 设置顶点颜色
+                                // Set vertex colors
                                 for &idx in &vertex_indices {
                                     if idx < vertex_colors.len() {
                                         vertex_colors[idx] = color;
@@ -605,7 +585,7 @@ impl GeometryData {
                             }
                         }
 
-                        // 插入颜色属性
+                        // Insert color attribute
                         mesh.insert_attribute(
                             Mesh::ATTRIBUTE_COLOR,
                             VertexAttributeValues::from(vertex_colors),
@@ -620,7 +600,7 @@ impl GeometryData {
         Ok(())
     }
 
-    // 从属性中提取所有lookup tables
+    // Extract all lookup tables from attributes
     pub fn extract_lookup_tables(&mut self) {
         if let Some(attributes) = &self.attributes {
             for ((name, _), attr) in attributes.iter() {
@@ -639,20 +619,20 @@ impl GeometryData {
         }
     }
 
-    // 获取指定名称的lookup table
-    pub fn get_lookup_table(&self, name: &str) -> Option<&Vec<[f32; 4]>> {
-        self.lookup_tables.get(name)
-    }
+    // Get lookup table with specified name
+    // pub fn get_lookup_table(&self, name: &str) -> Option<&Vec<[f32; 4]>> {
+    //     self.lookup_tables.get(name)
+    // }
 
-    // 检查是否存在指定名称的lookup table
-    pub fn has_lookup_table(&self, name: &str) -> bool {
-        self.lookup_tables.contains_key(name)
-    }
+    // Check if lookup table with specified name exists
+    // pub fn has_lookup_table(&self, name: &str) -> bool {
+    //     self.lookup_tables.contains_key(name)
+    // }
 
-    // 获取所有lookup table的名称
-    pub fn get_lookup_table_names(&self) -> Vec<String> {
-        self.lookup_tables.keys().cloned().collect()
-    }
+    // Get names of all lookup tables
+    // pub fn get_lookup_table_names(&self) -> Vec<String> {
+    //     self.lookup_tables.keys().cloned().collect()
+    // }
 }
 
 pub trait VtkMeshExtractor {
@@ -674,6 +654,7 @@ pub trait VtkMeshExtractor {
         points.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect()
     }
 
+    #[allow(dead_code)]
     fn extract_indices(&self, pieces: Self::PieceType) -> Vec<u32>;
 
     fn process_legacy(&self, pieces: Self::PieceType) -> Result<GeometryData, VtkError>;
@@ -687,7 +668,7 @@ pub trait VtkMeshExtractor {
 }
 
 impl UnstructuredGridExtractor {
-    // general triangulate cells - 使用通用三角化函数，返回二阶三角形和二阶边数据
+    // general triangulate cells - Use general triangulation function, returns quadratic triangle and quadratic edge data
     fn triangulate_cells(
         &self,
         cells: model::Cells,
@@ -714,7 +695,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
             .ok_or(VtkError::MissingData("No pieces found"))?;
 
         if let model::Piece::Inline(piece) = piece {
-            // 处理点数据属性
+            // Process point data attributes
             for point_data in &piece.data.point {
                 match point_data {
                     model::Attribute::DataArray(array) => {
@@ -728,7 +709,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
                 }
             }
 
-            // 处理单元格数据属性
+            // Process cell data attributes
             for cell_data in &piece.data.cell {
                 match cell_data {
                     model::Attribute::DataArray(array) => {
@@ -765,19 +746,19 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
 
         let vertices = self.extract_vertices(&piece.points);
         let (indices, triangle_to_cell_mapping, quadratic_triangles, quadratic_edges) =
-            self.triangulate_cells(piece.cells.clone()); // 使用clone来避免移动
+            self.triangulate_cells(piece.cells.clone());
         let attributes = self.extract_attributes_legacy(&pieces)?;
 
         let mut geometry = GeometryData::new(vertices, indices, attributes);
-        geometry.extract_lookup_tables(); // 提取lookup tables
+        geometry.extract_lookup_tables();
         geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
 
-        // 添加二阶三角形数据（如果有的话）
+        // Add quadratic triangle data (if any)
         if !quadratic_triangles.is_empty() {
             geometry = geometry.add_quadratic_triangles(quadratic_triangles);
         }
 
-        // 添加二阶边数据（如果有的话）
+        // Add quadratic edge data (if any)
         if !quadratic_edges.is_empty() {
             geometry = geometry.add_quadratic_edges(quadratic_edges);
         }
@@ -830,7 +811,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
                 ))
             }
             model::ElementType::Vectors => {
-                // 处理向量类型，每个向量有3个分量(x,y,z)
+                // Process vector type, each vector has 3 components (x,y,z)
                 let vectors: Vec<[f32; 3]> = values
                     .chunks_exact(3)
                     .map(|chunk| [chunk[0], chunk[1], chunk[2]])
@@ -839,7 +820,7 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
                 Ok((name.to_string(), AttributeType::Vector(vectors)))
             }
             model::ElementType::Normals => {
-                // 处理法线向量，与Vectors类似
+                // Process normal vectors, similar to Vectors
                 let normals: Vec<[f32; 3]> = values
                     .chunks_exact(3)
                     .map(|chunk| [chunk[0], chunk[1], chunk[2]])
@@ -849,15 +830,15 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
             }
             model::ElementType::TCoords(n) => {
                 println!("Texture coordinates: {} components", n);
-                // 简单处理为向量类型
+                // Simple processing as vector type
                 let coords: Vec<[f32; 3]> = if *n == 2 {
-                    // 2D纹理坐标，第三个分量为0
+                    // 2D texture coordinates, third component is 0
                     values
                         .chunks_exact(2)
                         .map(|chunk| [chunk[0], chunk[1], 0.0])
                         .collect()
                 } else if *n == 3 {
-                    // 3D纹理坐标
+                    // 3D texture coordinates
                     values
                         .chunks_exact(3)
                         .map(|chunk| [chunk[0], chunk[1], chunk[2]])
@@ -872,11 +853,11 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
             }
             model::ElementType::Tensors => {
                 println!("Tensor data is not fully supported, simplified processing");
-                // 简化处理为向量集合
+                // Simplified processing as vector collection
                 let tensors: Vec<[f32; 3]> = values
-                    .chunks_exact(9) // 3x3 张量
+                    .chunks_exact(9) // 3x3 tensor
                     .map(|chunk| {
-                        // 简化: 使用对角线元素
+                        // Simplified: use diagonal elements
                         [chunk[0], chunk[4], chunk[8]]
                     })
                     .collect();
@@ -896,9 +877,9 @@ impl VtkMeshExtractor for UnstructuredGridExtractor {
                     colors.len()
                 );
 
-                // 返回lookup table作为一个特殊的标量属性
+                // Return lookup table as a special scalar attribute
                 Ok((
-                    format!("__lut_{}", name), // 使用特殊前缀标记lookup table
+                    format!("__lut_{}", name), // Use special prefix to mark lookup table
                     AttributeType::Scalar {
                         num_comp: 4, // RGBA
                         table_name: name.to_string(),
@@ -934,7 +915,7 @@ impl VtkMeshExtractor for PolyDataExtractor {
         let point_attr_list = &piece.data.point;
         let cell_attr_list = &piece.data.cell;
 
-        // 处理点属性
+        // Process point attributes
         if !point_attr_list.is_empty() {
             for point_attr in point_attr_list {
                 match point_attr {
@@ -952,7 +933,7 @@ impl VtkMeshExtractor for PolyDataExtractor {
             }
         }
 
-        // 处理单元格属性
+        // Process cell attributes
         if !cell_attr_list.is_empty() {
             for cell_attr in cell_attr_list {
                 match cell_attr {
@@ -994,7 +975,7 @@ impl VtkMeshExtractor for PolyDataExtractor {
         let (indices, triangle_to_cell_mapping) = self.process_polydata(pieces.clone())?;
 
         let mut geometry = GeometryData::new(vertices, indices, attributes);
-        geometry.extract_lookup_tables(); // 提取lookup tables
+        geometry.extract_lookup_tables(); // Extract lookup tables
         geometry = geometry.add_triangle_to_cell_mapping(triangle_to_cell_mapping);
 
         Ok(geometry)
@@ -1120,7 +1101,7 @@ impl VtkMeshExtractor for PolyDataExtractor {
 }
 
 impl PolyDataExtractor {
-    // 改进的多边形数据处理方法
+    // Improved polygon data processing method
     fn process_polydata(
         &self,
         pieces: Vec<model::Piece<model::PolyDataPiece>>,
@@ -1128,32 +1109,32 @@ impl PolyDataExtractor {
         let piece = pieces
             .into_iter()
             .next()
-            .ok_or(VtkError::MissingData("未找到片段"))?;
+            .ok_or(VtkError::MissingData("Fragment not found"))?;
         let model::Piece::Inline(piece) = piece else {
-            return Err(VtkError::InvalidFormat("需要内联数据"));
+            return Err(VtkError::InvalidFormat("Inline data required"));
         };
 
         let mut indices = Vec::<u32>::new();
         let mut triangle_to_cell_mapping = Vec::<usize>::new();
 
-        // 处理顶点拓扑（跳过，因为它们不形成表面）
+        // Process vertex topology (skip, because they don't form a surface)
         if let Some(_) = piece.verts {
             println!("find verts - skip, because they don't form a surface");
         }
 
-        // 处理线拓扑（跳过，因为它们不形成表面）
+        // Process line topology (skip, because they don't form a surface)
         if let Some(_) = piece.lines {
             println!("find lines - skip, because they don't form a surface");
         }
 
-        // 处理多边形拓扑 - 主要处理逻辑
+        // Process polygon topology - main processing logic
         if let Some(polys) = piece.polys {
             let (polys_indices, polys_mapping) = self.triangulate_polygon(polys);
             indices.extend(polys_indices);
             triangle_to_cell_mapping.extend(polys_mapping);
         }
 
-        // 处理三角形条带（暂不实现）
+        // Process triangle strips (not implemented yet)
         if let Some(_strips) = piece.strips {
             println!("find strips - not supported");
             // todo!()
@@ -1169,7 +1150,7 @@ impl PolyDataExtractor {
     }
 
     fn triangulate_polygon(&self, topology: model::VertexNumbers) -> (Vec<u32>, Vec<usize>) {
-        // 使用通用三角化模块中的函数
+        // Use function from general triangulation module
         triangulation::triangulate_polygon(topology)
     }
 }

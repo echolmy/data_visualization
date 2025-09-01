@@ -19,6 +19,9 @@ pub struct GenerateWaveShaderEvent;
 #[derive(Event)]
 pub struct ClearAllMeshesEvent;
 
+#[derive(Event)]
+pub struct GenerateLODEvent;
+
 impl Default for SubdivideMeshEvent {
     fn default() -> Self {
         Self
@@ -38,6 +41,12 @@ impl Default for GenerateWaveShaderEvent {
 }
 
 impl Default for ClearAllMeshesEvent {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for GenerateLODEvent {
     fn default() -> Self {
         Self
     }

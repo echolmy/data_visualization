@@ -1,7 +1,7 @@
-//! 使用 Bevy 原生 API 生成复数平面波网格
+//! Generate complex planar wave meshes using Bevy native API
 //!
-//! 这个模块提供了基于 bevy Mesh 的波形网格生成功能，
-//! 支持复杂的几何操作和丰富的属性管理。
+//! This module provides wave mesh generation functionality based on bevy Mesh,
+//! supporting geometric operations and attribute management.
 #![allow(unused)]
 
 use bevy::prelude::*;
@@ -78,7 +78,7 @@ pub fn generate_wave_surface(
     let step_x = width / (width_resolution - 1) as f32;
     let step_z = depth / (depth_resolution - 1) as f32;
 
-    // 生成顶点位置
+    // Generate vertex positions
     let mut positions = Vec::new();
     let mut uvs = Vec::new();
 
@@ -97,8 +97,8 @@ pub fn generate_wave_surface(
         }
     }
 
-    // 生成索引（三角形）
-    // 四边形分解为两个三角形（逆时针顺序）：
+    // Generate indices (triangles)
+    // Decompose quadrilaterals into two triangles (counter-clockwise order):
     // current ---- current+1
     //   |       /      |
     //   |      /       |
@@ -110,24 +110,24 @@ pub fn generate_wave_surface(
             let current = j * width_resolution + i;
             let next_row = (j + 1) * width_resolution + i;
 
-            // 第一个三角形（逆时针）
+            // First triangle (counter-clockwise)
             indices.push(current as u32);
             indices.push(next_row as u32);
             indices.push((current + 1) as u32);
 
-            // 第二个三角形（逆时针）
+            // Second triangle (counter-clockwise)
             indices.push((current + 1) as u32);
             indices.push(next_row as u32);
             indices.push((next_row + 1) as u32);
         }
     }
 
-    // 设置网格属性
+    // Set mesh attributes
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
 
-    // 让 Bevy 自动计算平滑法线
+    // Let Bevy automatically compute smooth normals
     mesh.compute_smooth_normals();
 
     mesh

@@ -1,20 +1,11 @@
 //! Render Module
 //!
-//! Contains all rendering-related functionality:
+//! Contains rendering-related functionality:
 //! - Wireframe rendering: Global wireframe mode toggle and individual control
 //! - Wave material: Dynamic wave effects implemented with GPU shaders
-
-// Sub-module declarations
 pub mod wave_material;
-
-// Re-export wave material related items
 pub use wave_material::{animate_wave_shader, create_flat_plane_mesh, WaveMaterial};
 
-/// Wireframe Rendering Functionality
-///
-/// Implements wireframe rendering functionality using the Bevy engine, providing global wireframe mode
-/// toggling and individual entity wireframe control. Supports keyboard shortcuts (Z key) and UI events
-/// to toggle wireframe rendering mode.
 use crate::ui::events::ToggleWireframeEvent;
 use crate::Mesh3d;
 use bevy::{
@@ -26,17 +17,13 @@ use bevy::{
 /// Component for tracking mesh entities that have been processed for wireframe rendering
 ///
 /// This component is used to track which mesh entities have already been processed for wireframe
-/// rendering settings, avoiding duplicate processing of the same entity.
+/// rendering settings.
 #[derive(Component)]
 pub struct ProcessedForWireframe;
 
 /// Toggle wireframe rendering system
 ///
 /// This system handles wireframe mode toggling with the following features:
-/// - Toggle global wireframe mode via Z key press
-/// - Toggle wireframe mode via UI events
-/// - Automatically detect and count entities that can render wireframes
-/// - Output debug information on first run
 ///
 /// # Parameters
 /// - `keyboard_input`: Keyboard input resource for detecting Z key press
@@ -76,9 +63,7 @@ pub fn toggle_wireframe(
 
 /// Initialize wireframe rendering configuration
 ///
-/// Sets up default wireframe rendering configuration, including:
-/// - Default global wireframe mode disabled
-/// - Set default wireframe color to white
+/// Sets up default wireframe rendering configuration
 ///
 /// # Returns
 /// Returns configured WireframeConfig resource

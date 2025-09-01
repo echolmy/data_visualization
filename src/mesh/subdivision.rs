@@ -1,67 +1,6 @@
-//! # 自适应网格细分模块
+//! # Adaptive Mesh Subdivision Module
 //!
-//! 本模块为三角网格提供无限细分能力，支持线性三角形（3个顶点）、二次三角形（6个顶点）和二次边（3个顶点）。
-//!
-//! ## 核心功能
-//! - 标准4分细分：每个三角形分成4个小三角形
-//! - 二次边细分：每个二次边分成2个子边
-//! - 线性插值：边中点使用线性插值计算
-//! - 二次插值：使用二次形函数进行精确插值
-//! - 属性插值：支持标量、向量、张量等属性的插值
-//! - 映射维护：保持三角形到单元格的映射关系
-//!
-//! ## 二次形函数插值
-//!
-//! 基于图8-17中定义的二次拉格朗日形函数，本模块实现精确的二次三角形细分：
-//!
-//! ### 参数坐标系统
-//! - p0位于(r=0, s=0) - 角顶点0
-//! - p1位于(r=1, s=0) - 角顶点1  
-//! - p2位于(r=0, s=1) - 角顶点2
-//! - p3位于(r=0.5, s=0) - 边01中点
-//! - p4位于(r=0.5, s=0.5) - 边12中点
-//! - p5位于(r=0, s=0.5) - 边20中点
-//!
-//! ### 形函数定义
-//! - W0 = (1 - r - s)(2(1 - r - s) - 1) - 对应p0
-//! - W1 = r(2r - 1) - 对应p1
-//! - W2 = s(2s - 1) - 对应p2
-//! - W3 = 4r(1 - r - s) - 对应p3
-//! - W4 = 4rs - 对应p4
-//! - W5 = 4s(1 - r - s) - 对应p5
-//!
-//! ### 插值公式
-//! 任意参数坐标(r, s)处的坐标为：
-//! ```
-//! P(r,s) = W0*p0 + W1*p1 + W2*p2 + W3*p3 + W4*p4 + W5*p5
-//! ```
-//!
-//! ## 二次边形函数插值
-//!
-//! 基于图8-16中定义的二次边拉格朗日形函数，本模块实现精确的二次边细分：
-//!
-//! ### 参数坐标系统
-//! - p0位于r=0处 - 起始端点
-//! - p1位于r=1处 - 结束端点
-//! - p2位于r=0.5处 - 边中点
-//!
-//! ### 形函数定义
-//! - W0 = 2(r - 0.5)(r - 1) - 对应p0
-//! - W1 = 2r(r - 0.5) - 对应p1
-//! - W2 = 4r(1 - r) - 对应p2
-//!
-//! ### 插值公式
-//! 任意参数坐标r处的坐标为：
-//! ```
-//! P(r) = W0*p0 + W1*p1 + W2*p2
-//! ```
-//!
-//! ## 使用示例
-//!
-//! ```rust
-//! // 对网格进行一次细分
-//! let subdivided_geometry = subdivide_mesh(&geometry)?;
-//! ```
+//! This module provides subdivision capabilities for triangular meshes, supporting linear triangles (3 vertices), quadratic triangles (6 vertices), and quadratic edges (3 vertices).
 
 use super::{
     AttributeLocation, AttributeType, GeometryData, QuadraticEdge, QuadraticTriangle, VtkError,
@@ -69,38 +8,38 @@ use super::{
 use bevy::utils::HashMap;
 
 // ============================================================================
-// 公共接口
+// Public Interface
 // ============================================================================
 
-/// 对网格进行细分
+/// Subdivide mesh
 ///
-/// 这是主要的细分接口，支持线性和二次三角网格的细分。
+/// This is the main subdivision interface, supporting subdivision of linear and quadratic triangular meshes.
 ///
-/// # 参数
-/// * `geometry` - 要细分的几何数据
+/// # Parameters
+/// * `geometry` - The geometry data to subdivide
 ///
-/// # 返回值
-/// * `Ok(GeometryData)` - 细分后的几何数据
-/// * `Err(VtkError)` - 如果细分失败，返回错误信息
+/// # Returns
+/// * `Ok(GeometryData)` - The subdivided geometry data
+/// * `Err(VtkError)` - If subdivision fails, returns error information
 ///
 pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError> {
     let original_vertices = &geometry.vertices;
     let original_indices = &geometry.indices;
 
-    // 验证输入
+    // Validate input
     if original_indices.len() % 3 != 0 {
-        return Err(VtkError::InvalidFormat("网格必须是三角形"));
+        return Err(VtkError::InvalidFormat("Mesh must be triangular"));
     }
 
     let num_triangles = original_indices.len() / 3;
 
     println!(
-        "开始网格细分，原始网格: {} 个顶点, {} 个三角形",
+        "Starting mesh subdivision, original mesh: {} vertices, {} triangles",
         geometry.vertices.len(),
         num_triangles
     );
 
-    // 执行细分操作
+    // Execute subdivision
     let (
         new_vertices,
         new_indices,
@@ -109,14 +48,16 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
         new_quadratic_edges,
     ) = match (&geometry.quadratic_triangles, &geometry.quadratic_edges) {
         (Some(quadratic_triangles), quadratic_edges_opt) => {
-            println!("网格包含二阶三角形，使用二次形函数插值");
-            // 使用二次形函数插值进行细分
+            println!(
+                "Mesh contains quadratic triangles, using quadratic shape function interpolation"
+            );
+            // Use quadratic shape function interpolation for subdivision
             let (vertices, indices, edge_map, quad_triangles) =
                 quadratic_4_subdivision(original_vertices, original_indices, quadratic_triangles)?;
 
-            // 如果还有二次边，也进行细分
+            // If there are also quadratic edges, subdivide them as well
             let (final_vertices, quad_edges) = if let Some(quadratic_edges) = quadratic_edges_opt {
-                println!("同时处理二阶边细分");
+                println!("Also processing quadratic edge subdivision");
                 let (edge_vertices, subdivided_edges) =
                     quadratic_edge_2_subdivision(&vertices, quadratic_edges)?;
                 (edge_vertices, subdivided_edges)
@@ -133,27 +74,27 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
             )
         }
         (None, Some(quadratic_edges)) => {
-            println!("网格只包含二阶边，使用边形函数插值");
-            // 处理二次边细分
+            println!("Mesh contains only quadratic edges, using edge shape function interpolation");
+            // Process quadratic edge subdivision
             let (edge_vertices, subdivided_edges) =
                 quadratic_edge_2_subdivision(original_vertices, quadratic_edges)?;
 
-            // 对于只有边的情况，也执行常规的三角形细分（如果有三角形的话）
+            // For edge-only cases, also perform regular triangle subdivision
             let (vertices, indices, edge_map) =
                 smooth_4_subdivision(&edge_vertices, original_indices)?;
 
             (vertices, indices, edge_map, Vec::new(), subdivided_edges)
         }
         (None, None) => {
-            println!("网格不包含二阶元素，使用线性插值");
-            // 执行标准4分细分
+            println!("Mesh contains no quadratic elements, using linear interpolation");
+            // Perform standard 4-way subdivision
             let (vertices, indices, edge_map) =
                 smooth_4_subdivision(original_vertices, original_indices)?;
             (vertices, indices, edge_map, Vec::new(), Vec::new())
         }
     };
 
-    // 插值属性数据
+    // Interpolate attribute data
     let new_attributes = if let Some(attrs) = &geometry.attributes {
         interpolate_attributes_for_subdivision(
             attrs,
@@ -165,39 +106,39 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
         HashMap::new()
     };
 
-    // 生成新的三角形到单元格映射
+    // Generate new triangle to cell mapping
     let new_triangle_to_cell_mapping =
         if let Some(original_mapping) = &geometry.triangle_to_cell_mapping {
             generate_subdivided_triangle_mapping(original_mapping)
         } else {
-            // 如果原始几何数据没有映射，生成默认映射
+            // If original geometry data has no mapping, generate default mapping
             generate_default_triangle_mapping(num_triangles)
         };
 
-    // 创建新的几何数据
+    // Create new geometry data
     let mut new_geometry = GeometryData::new(new_vertices, new_indices, new_attributes);
     new_geometry.triangle_to_cell_mapping = Some(new_triangle_to_cell_mapping);
 
-    // 如果有新的二次三角形，添加到几何数据中
+    // If there are new quadratic triangles, add them to geometry data
     if !new_quadratic_triangles.is_empty() {
         new_geometry = new_geometry.add_quadratic_triangles(new_quadratic_triangles);
         println!(
-            "生成了 {} 个二次三角形",
+            "Generated {} quadratic triangles",
             new_geometry.quadratic_triangles.as_ref().unwrap().len()
         );
     }
 
-    // 如果有新的二次边，添加到几何数据中
+    // If there are new quadratic edges, add them to geometry data
     if !new_quadratic_edges.is_empty() {
         new_geometry = new_geometry.add_quadratic_edges(new_quadratic_edges);
         println!(
-            "生成了 {} 个二次边",
+            "Generated {} quadratic edges",
             new_geometry.quadratic_edges.as_ref().unwrap().len()
         );
     }
 
     println!(
-        "细分完成: {} 个顶点, {} 个三角形",
+        "Subdivision completed: {} vertices, {} triangles",
         new_geometry.vertices.len(),
         new_geometry.indices.len() / 3
     );
@@ -206,39 +147,19 @@ pub fn subdivide_mesh(geometry: &GeometryData) -> Result<GeometryData, VtkError>
 }
 
 // ============================================================================
-// 核心细分算法
+// Core Subdivision Algorithms
 // ============================================================================
 
-/// 二次三角形4分细分 - 使用二次形函数插值
+/// Quadratic triangle 4-way subdivision - using quadratic shape function interpolation
 ///
-/// 实现基于二次形函数的4分细分算法，每个二次三角形分成4个完整的二次三角形。
-/// 使用二次拉格朗日插值计算新的边中点和面中点，保持曲面的精确度。
-/// 每个子三角形都包含完整的6个控制点，支持进一步的细分。
+/// # Parameters
+/// * `vertices` - Original vertex list
+/// * `indices` - Original index list
+/// * `quadratic_triangles` - Quadratic triangle data (containing complete 6 control points)
 ///
-/// # 参数
-/// * `vertices` - 原始顶点列表
-/// * `indices` - 原始索引列表（只使用角顶点）
-/// * `quadratic_triangles` - 二次三角形数据（包含完整的6个控制点）
-///
-/// # 返回值
-/// * `Ok((Vec<[f32; 3]>, Vec<u32>, HashMap<(u32, u32), u32>, Vec<QuadraticTriangle>))` - (新顶点列表, 新索引列表, 边中点映射, 新的二次三角形列表)
-/// * `Err(VtkError)` - 如果细分失败，返回错误信息
-///
-/// # 二次形函数
-/// 使用图8-17中定义的6个二次拉格朗日形函数：
-/// - W0 = (1 - r - s)(2(1 - r - s) - 1)
-/// - W1 = r(2r - 1)
-/// - W2 = s(2s - 1)
-/// - W3 = 4r(1 - r - s)
-/// - W4 = 4rs
-/// - W5 = 4s(1 - r - s)
-///
-/// # 细分策略
-/// 每个二次三角形分成4个完整的二次子三角形：
-/// 1. 左上角子三角形：(v0, mid01, mid20) + 相应的边中点
-/// 2. 右下角子三角形：(mid01, v1, mid12) + 相应的边中点  
-/// 3. 左下角子三角形：(mid20, mid12, v2) + 相应的边中点
-/// 4. 中心子三角形：(mid01, mid12, mid20) + 相应的边中点
+/// # Returns
+/// * `Ok((Vec<[f32; 3]>, Vec<u32>, HashMap<(u32, u32), u32>, Vec<QuadraticTriangle>))` - (new vertex list, new index list, edge midpoint mapping, new quadratic triangle list)
+/// * `Err(VtkError)` - If subdivision fails, returns error information
 fn quadratic_4_subdivision(
     vertices: &Vec<[f32; 3]>,
     indices: &Vec<u32>,
@@ -259,37 +180,36 @@ fn quadratic_4_subdivision(
     let mut new_quadratic_triangles = Vec::new();
 
     println!(
-        "二次三角形细分：处理 {} 个二次三角形",
+        "Quadratic triangle subdivision: processing {} quadratic triangles",
         quadratic_triangles.len()
     );
 
     for (_triangle_idx, quadratic_tri) in quadratic_triangles.iter().enumerate() {
-        // 使用便利方法获取控制点索引，提高代码可读性和类型安全性
-        let corner_verts = quadratic_tri.corner_vertices(); // [v0, v1, v2] - 三个角顶点
-        let edge_mids = quadratic_tri.edge_midpoints(); // [m01, m12, m20] - 三个边中点
+        let corner_verts = quadratic_tri.corner_vertices(); // [v0, v1, v2] - three corner vertices
+        let edge_mids = quadratic_tri.edge_midpoints(); // [m01, m12, m20] - three edge midpoints
 
-        // 获取角顶点坐标
-        let p0 = vertices[corner_verts[0] as usize]; // 角顶点0
-        let p1 = vertices[corner_verts[1] as usize]; // 角顶点1
-        let p2 = vertices[corner_verts[2] as usize]; // 角顶点2
+        // Get corner vertex coordinates
+        let p0 = vertices[corner_verts[0] as usize]; // Corner vertex 0
+        let p1 = vertices[corner_verts[1] as usize]; // Corner vertex 1
+        let p2 = vertices[corner_verts[2] as usize]; // Corner vertex 2
 
-        // 获取边中点坐标
-        let p3 = vertices[edge_mids[0] as usize]; // 边01中点
-        let p4 = vertices[edge_mids[1] as usize]; // 边12中点
-        let p5 = vertices[edge_mids[2] as usize]; // 边20中点
+        // Get edge midpoint coordinates
+        let p3 = vertices[edge_mids[0] as usize]; // Edge 01 midpoint
+        let p4 = vertices[edge_mids[1] as usize]; // Edge 12 midpoint
+        let p5 = vertices[edge_mids[2] as usize]; // Edge 20 midpoint
 
-        // 确保按照逆时针顺序处理二次三角形
-        // 原始二次三角形控制点顺序: [v0, v1, v2, m01, m12, m20]
+        // Ensure processing quadratic triangles in counter-clockwise order
+        // Original quadratic triangle control point order: [v0, v1, v2, m01, m12, m20]
 
-        // 使用二次形函数计算新的边中点
-        // 主边中点：3个主要边的中点
+        // Use quadratic shape functions to calculate new edge midpoints
+        // Main edge midpoints: midpoints of 3 main edges
         let mid01 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             corner_verts[0],
             corner_verts[1],
             &[p0, p1, p2, p3, p4, p5],
-            (0.5, 0.0), // 边01中点的参数坐标
+            (0.5, 0.0), // Edge 01 midpoint parameter coordinates
         );
 
         let mid12 = get_or_create_quadratic_edge_midpoint(
@@ -298,7 +218,7 @@ fn quadratic_4_subdivision(
             corner_verts[1],
             corner_verts[2],
             &[p0, p1, p2, p3, p4, p5],
-            (0.5, 0.5), // 边12中点的参数坐标
+            (0.5, 0.5), // Edge 12 midpoint parameter coordinates
         );
 
         let mid20 = get_or_create_quadratic_edge_midpoint(
@@ -307,78 +227,78 @@ fn quadratic_4_subdivision(
             corner_verts[2],
             corner_verts[0],
             &[p0, p1, p2, p3, p4, p5],
-            (0.0, 0.5), // 边20中点的参数坐标
+            (0.0, 0.5), // Edge 20 midpoint parameter coordinates
         );
 
-        // 计算新边的中点（子三角形之间的边）
-        // mid01 到 v0 的边中点
+        // Calculate midpoints of new edges (edges between sub-triangles)
+        // Edge midpoint from mid01 to v0
         let mid_mid01_v0 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             corner_verts[0],
             mid01,
             &[p0, p1, p2, p3, p4, p5],
-            (0.25, 0.0), // 细分后的边中点
+            (0.25, 0.0), // Subdivided edge midpoint
         );
 
-        // mid01 到 v1 的边中点
+        // Edge midpoint from mid01 to v1
         let mid_mid01_v1 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             mid01,
             corner_verts[1],
             &[p0, p1, p2, p3, p4, p5],
-            (0.75, 0.0), // 细分后的边中点
+            (0.75, 0.0), // Subdivided edge midpoint
         );
 
-        // mid12 到 v1 的边中点
+        // Edge midpoint from mid12 to v1
         let mid_mid12_v1 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             corner_verts[1],
             mid12,
             &[p0, p1, p2, p3, p4, p5],
-            (0.75, 0.25), // 细分后的边中点
+            (0.75, 0.25), // Subdivided edge midpoint
         );
 
-        // mid12 到 v2 的边中点
+        // Edge midpoint from mid12 to v2
         let mid_mid12_v2 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             mid12,
             corner_verts[2],
             &[p0, p1, p2, p3, p4, p5],
-            (0.25, 0.75), // 细分后的边中点
+            (0.25, 0.75), // Subdivided edge midpoint
         );
 
-        // mid20 到 v2 的边中点
+        // Edge midpoint from mid20 to v2
         let mid_mid20_v2 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             corner_verts[2],
             mid20,
             &[p0, p1, p2, p3, p4, p5],
-            (0.0, 0.75), // 细分后的边中点
+            (0.0, 0.75), // Subdivided edge midpoint
         );
 
-        // mid20 到 v0 的边中点
+        // Edge midpoint from mid20 to v0
         let mid_mid20_v0 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             mid20,
             corner_verts[0],
             &[p0, p1, p2, p3, p4, p5],
-            (0.0, 0.25), // 细分后的边中点
+            (0.0, 0.25), // Subdivided edge midpoint
         );
 
-        // 内部连接边的中点
+        // Internal connection edge midpoints
         let mid_mid01_mid12 = get_or_create_quadratic_edge_midpoint(
             &mut edge_midpoints,
             &mut new_vertices,
             mid01,
             mid12,
             &[p0, p1, p2, p3, p4, p5],
-            (0.5, 0.25), // 内部边中点
+            (0.5, 0.25), // Internal edge midpoint
         );
 
         let mid_mid12_mid20 = get_or_create_quadratic_edge_midpoint(
@@ -387,7 +307,7 @@ fn quadratic_4_subdivision(
             mid12,
             mid20,
             &[p0, p1, p2, p3, p4, p5],
-            (0.25, 0.5), // 内部边中点
+            (0.25, 0.5), // Internal edge midpoint
         );
 
         let mid_mid20_mid01 = get_or_create_quadratic_edge_midpoint(
@@ -396,63 +316,61 @@ fn quadratic_4_subdivision(
             mid20,
             mid01,
             &[p0, p1, p2, p3, p4, p5],
-            (0.25, 0.25), // 内部边中点
+            (0.25, 0.25), // Internal edge midpoint
         );
 
-        // 生成4个子三角形的索引（逆时针顺序）
-        // 1. 左上角子三角形：(v0, mid01, mid20)
+        // Generate indices for 4 sub-triangles (counter-clockwise order)
+        // 1. Top-left sub-triangle: (v0, mid01, mid20)
         new_indices.extend_from_slice(&[corner_verts[0], mid01, mid20]);
         let quad_tri_1 = QuadraticTriangle::new([
             corner_verts[0],
             mid01,
-            mid20, // 角顶点
+            mid20, // Corner vertices
             mid_mid01_v0,
             mid_mid20_mid01,
-            mid_mid20_v0, // 边中点
+            mid_mid20_v0, // Edge midpoints
         ]);
         new_quadratic_triangles.push(quad_tri_1);
 
-        // 2. 右下角子三角形：(mid01, v1, mid12)
+        // 2. Bottom-right sub-triangle: (mid01, v1, mid12)
         new_indices.extend_from_slice(&[mid01, corner_verts[1], mid12]);
         let quad_tri_2 = QuadraticTriangle::new([
             mid01,
             corner_verts[1],
-            mid12, // 角顶点
+            mid12, // Corner vertices
             mid_mid01_v1,
             mid_mid12_v1,
-            mid_mid01_mid12, // 边中点
+            mid_mid01_mid12, // Edge midpoints
         ]);
         new_quadratic_triangles.push(quad_tri_2);
 
-        // 3. 左下角子三角形：(mid20, mid12, v2)
+        // 3. Bottom-left sub-triangle: (mid20, mid12, v2)
         new_indices.extend_from_slice(&[mid20, mid12, corner_verts[2]]);
         let quad_tri_3 = QuadraticTriangle::new([
             mid20,
             mid12,
-            corner_verts[2], // 角顶点
+            corner_verts[2], // Corner vertices
             mid_mid12_mid20,
             mid_mid12_v2,
-            mid_mid20_v2, // 边中点
+            mid_mid20_v2, // Edge midpoints
         ]);
         new_quadratic_triangles.push(quad_tri_3);
 
-        // 4. 中心子三角形：(mid01, mid12, mid20) - 确保逆时针顺序
+        // 4. Center sub-triangle: (mid01, mid12, mid20) - counter-clockwise order
         new_indices.extend_from_slice(&[mid01, mid12, mid20]);
         let quad_tri_4 = QuadraticTriangle::new([
             mid01,
             mid12,
-            mid20, // 角顶点
+            mid20, // Corner vertices
             mid_mid01_mid12,
             mid_mid12_mid20,
-            mid_mid20_mid01, // 边中点
+            mid_mid20_mid01, // Edge midpoints
         ]);
         new_quadratic_triangles.push(quad_tri_4);
-
-        // 生成了4个子二次三角形，按逆时针顺序排列
     }
 
     println!(
-        "总共生成了 {} 个新的二次三角形",
+        "Total generated {} new quadratic triangles",
         new_quadratic_triangles.len()
     );
 
@@ -464,27 +382,21 @@ fn quadratic_4_subdivision(
     ))
 }
 
-/// 使用二次形函数获取或创建边中点顶点
+/// Get or create edge midpoint vertex using quadratic shape functions
 ///
-/// 此函数使用二次拉格朗日插值计算边中点，而不是简单的线性插值。
-/// 它根据参数坐标中点位置 (r=0.5, s=0 或其他组合) 计算精确的曲面位置。
+/// This function uses quadratic Lagrange interpolation to calculate edge midpoints
+/// It calculates surface positions based on parametric coordinate midpoint positions.
 ///
-/// # 参数
-/// * `edge_midpoints` - 边中点HashMap缓存
-/// * `vertices` - 用于添加新中点的顶点列表的可变引用
-/// * `v0` - 边的第一个顶点索引
-/// * `v1` - 边的第二个顶点索引
-/// * `control_points` - 二次三角形的6个控制点坐标
-/// * `parametric_coords` - 边中点的参数坐标 (r, s)
+/// # Parameters
+/// * `edge_midpoints` - Edge midpoint
+/// * `vertices` - Vertex list
+/// * `v0` - First vertex index of the edge
+/// * `v1` - Second vertex index of the edge
+/// * `control_points` - 6 control point coordinates of the quadratic triangle
+/// * `parametric_coords` - Parametric coordinates (r, s) of the edge midpoint
 ///
-/// # 返回值
-/// * `u32` - 中点顶点的索引（已存在或新创建的）
-///
-/// # 二次插值策略
-/// 根据边的类型，使用相应的参数坐标计算中点：
-/// - 边01: (r=0.5, s=0)
-/// - 边12: (r=0.5, s=0.5)
-/// - 边20: (r=0, s=0.5)
+/// # Returns
+/// * `u32` - Index of the midpoint vertex
 fn get_or_create_quadratic_edge_midpoint(
     edge_midpoints: &mut HashMap<(u32, u32), u32>,
     vertices: &mut Vec<[f32; 3]>,
@@ -493,53 +405,44 @@ fn get_or_create_quadratic_edge_midpoint(
     control_points: &[[f32; 3]; 6],
     parametric_coords: (f32, f32),
 ) -> u32 {
-    // 确保一致的边顶点排序
+    // Ensure consistent edge vertex ordering
     let edge = if v0 < v1 { (v0, v1) } else { (v1, v0) };
 
-    // 如果中点已存在，直接返回
+    // If midpoint already exists, return directly
     if let Some(&midpoint_idx) = edge_midpoints.get(&edge) {
         return midpoint_idx;
     }
 
-    // 使用提供的参数坐标
     let (r, s) = parametric_coords;
 
-    // 使用二次形函数计算中点坐标
+    // Use quadratic shape functions to calculate midpoint coordinates
     let midpoint = quadratic_interpolation(r, s, control_points);
 
-    // 添加新顶点
+    // Add new vertex
     let midpoint_idx = vertices.len() as u32;
     vertices.push(midpoint);
 
-    // 记录边中点映射
+    // Add edge midpoint mapping
     edge_midpoints.insert(edge, midpoint_idx);
 
     midpoint_idx
 }
 
-/// 二次拉格朗日插值函数
+/// Quadratic Lagrange interpolation function
 ///
-/// 根据参数坐标 (r, s) 和6个控制点，使用二次形函数计算插值点坐标。
+/// Calculates interpolated point coordinates using quadratic shape functions based on parametric coordinates (r, s) and 6 control points.
 ///
-/// # 参数
-/// * `r` - 参数坐标r
-/// * `s` - 参数坐标s
-/// * `control_points` - 6个控制点坐标 [p0, p1, p2, p3, p4, p5]
+/// # Parameters
+/// * `r` - Parametric coordinate r
+/// * `s` - Parametric coordinate s
+/// * `control_points` - 6 control point coordinates [p0, p1, p2, p3, p4, p5]
 ///
-/// # 返回值
-/// * `[f32; 3]` - 插值得到的点坐标
-///
-/// # 形函数定义（基于图8-17）
-/// - W0 = (1 - r - s)(2(1 - r - s) - 1) - 对应p0（角顶点）
-/// - W1 = r(2r - 1) - 对应p1（角顶点）
-/// - W2 = s(2s - 1) - 对应p2（角顶点）
-/// - W3 = 4r(1 - r - s) - 对应p3（边01中点）
-/// - W4 = 4rs - 对应p4（边12中点）
-/// - W5 = 4s(1 - r - s) - 对应p5（边20中点）
+/// # Returns
+/// * `[f32; 3]` - Interpolated point coordinates
 fn quadratic_interpolation(r: f32, s: f32, control_points: &[[f32; 3]; 6]) -> [f32; 3] {
     let t = 1.0 - r - s; // t = 1 - r - s
 
-    // 计算6个二次形函数值
+    // Calculate 6 quadratic shape function values
     let w0 = t * (2.0 * t - 1.0); // W0 = (1-r-s)(2(1-r-s)-1)
     let w1 = r * (2.0 * r - 1.0); // W1 = r(2r-1)
     let w2 = s * (2.0 * s - 1.0); // W2 = s(2s-1)
@@ -547,44 +450,31 @@ fn quadratic_interpolation(r: f32, s: f32, control_points: &[[f32; 3]; 6]) -> [f
     let w4 = 4.0 * r * s; // W4 = 4rs
     let w5 = 4.0 * s * t; // W5 = 4s(1-r-s)
 
-    // 线性组合计算插值点坐标
+    // Linear combination to calculate interpolated point coordinates
     let mut result = [0.0; 3];
     for i in 0..3 {
-        result[i] = w0 * control_points[0][i]  // p0贡献
-                  + w1 * control_points[1][i]  // p1贡献
-                  + w2 * control_points[2][i]  // p2贡献
-                  + w3 * control_points[3][i]  // p3贡献（边01中点）
-                  + w4 * control_points[4][i]  // p4贡献（边12中点）
-                  + w5 * control_points[5][i]; // p5贡献（边20中点）
+        result[i] = w0 * control_points[0][i]  // p0 contribution
+                  + w1 * control_points[1][i]  // p1 contribution
+                  + w2 * control_points[2][i]  // p2 contribution
+                  + w3 * control_points[3][i]  // p3 contribution (edge 01 midpoint)
+                  + w4 * control_points[4][i]  // p4 contribution (edge 12 midpoint)
+                  + w5 * control_points[5][i]; // p5 contribution (edge 20 midpoint)
     }
 
     result
 }
 
-/// 二次边2分细分 - 使用二次边形函数插值
+/// Quadratic edge 2-way subdivision - using quadratic edge shape function interpolation
 ///
-/// 实现基于二次边形函数的2分细分算法，每个二次边分成2个完整的二次子边。
-/// 使用二次拉格朗日插值计算新的边点，保持曲线的精确度。
-/// 每个子边都包含完整的3个控制点，支持进一步的细分。
+/// Implements 2-way subdivision algorithm based on quadratic edge shape functions.
 ///
-/// # 参数
-/// * `vertices` - 原始顶点列表
-/// * `quadratic_edges` - 二次边数据（包含完整的3个控制点）
+/// # Parameters
+/// * `vertices` - Original vertex list
+/// * `quadratic_edges` - Quadratic edge data (containing complete 3 control points)
 ///
-/// # 返回值
-/// * `Ok((Vec<[f32; 3]>, Vec<QuadraticEdge>))` - (新顶点列表, 新的二次边列表)
-/// * `Err(VtkError)` - 如果细分失败，返回错误信息
-///
-/// # 二次边形函数
-/// 使用图8-16中定义的3个二次拉格朗日形函数：
-/// - W0 = 2(r - 0.5)(r - 1)
-/// - W1 = 2r(r - 0.5)
-/// - W2 = 4r(1 - r)
-///
-/// # 细分策略
-/// 每个二次边分成2个完整的二次子边：
-/// 1. 左半段子边：(p0, mid, new_left_mid)
-/// 2. 右半段子边：(mid, p1, new_right_mid)
+/// # Returns
+/// * `Ok((Vec<[f32; 3]>, Vec<QuadraticEdge>))` - (new vertex list, new quadratic edge list)
+/// * `Err(VtkError)` - If subdivision fails, returns error information
 fn quadratic_edge_2_subdivision(
     vertices: &Vec<[f32; 3]>,
     quadratic_edges: &Vec<QuadraticEdge>,
@@ -592,108 +482,101 @@ fn quadratic_edge_2_subdivision(
     let mut new_vertices = vertices.clone();
     let mut new_quadratic_edges = Vec::new();
 
-    println!("二次边细分：处理 {} 个二次边", quadratic_edges.len());
+    println!(
+        "Quadratic edge subdivision: processing {} quadratic edges",
+        quadratic_edges.len()
+    );
 
     for quadratic_edge in quadratic_edges.iter() {
-        // 获取二次边的控制点
+        // Get control points of the quadratic edge
         let endpoints = quadratic_edge.endpoints();
         let midpoint_idx = quadratic_edge.midpoint();
-        let p0 = vertices[endpoints[0] as usize]; // r=0端点
-        let p1 = vertices[endpoints[1] as usize]; // r=1端点
-        let p2 = vertices[midpoint_idx as usize]; // r=0.5中点
+        let p0 = vertices[endpoints[0] as usize]; // r=0 endpoint
+        let p1 = vertices[endpoints[1] as usize]; // r=1 endpoint
+        let p2 = vertices[midpoint_idx as usize]; // r=0.5 midpoint
 
-        // 使用二次边形函数计算新的分割点
-        // 计算r=0.25处的点（左半段的中点）
+        // Use quadratic edge shape functions to calculate new division points
+        // Calculate point at r=0.25 (left half midpoint)
         let left_mid = quadratic_edge_interpolation(0.25, &[p0, p1, p2]);
         let left_mid_idx = new_vertices.len() as u32;
         new_vertices.push(left_mid);
 
-        // 计算r=0.75处的点（右半段的中点）
+        // Calculate point at r=0.75 (right half midpoint)
         let right_mid = quadratic_edge_interpolation(0.75, &[p0, p1, p2]);
         let right_mid_idx = new_vertices.len() as u32;
         new_vertices.push(right_mid);
 
-        // 生成2个子边
-        // 1. 左半段子边：(p0, 原中点p2, 新left_mid)
+        // Generate 2 sub-edges
+        // 1. Left half sub-edge: (p0, original midpoint p2, new left_mid)
         let left_edge = QuadraticEdge::new([
             endpoints[0], // p0
-            midpoint_idx, // 原中点，现在是左半段的终点
-            left_mid_idx, // 新的左半段中点
+            midpoint_idx, // Original midpoint, now endpoint of left half
+            left_mid_idx, // New left half midpoint
         ]);
         new_quadratic_edges.push(left_edge);
 
-        // 2. 右半段子边：(原中点p2, p1, 新right_mid)
+        // 2. Right half sub-edge: (original midpoint p2, p1, new right_mid)
         let right_edge = QuadraticEdge::new([
-            midpoint_idx,  // 原中点，现在是右半段的起点
+            midpoint_idx,  // Original midpoint, now starting point of right half
             endpoints[1],  // p1
-            right_mid_idx, // 新的右半段中点
+            right_mid_idx, // New right half midpoint
         ]);
         new_quadratic_edges.push(right_edge);
     }
 
-    println!("总共生成了 {} 个新的二次边", new_quadratic_edges.len());
+    println!(
+        "Total generated {} new quadratic edges",
+        new_quadratic_edges.len()
+    );
 
     Ok((new_vertices, new_quadratic_edges))
 }
 
-/// 二次边拉格朗日插值函数
+/// Quadratic edge Lagrange interpolation function
 ///
-/// 根据参数坐标 r 和3个控制点，使用二次边形函数计算插值点坐标。
+/// Calculates interpolated point coordinates using quadratic edge shape functions based on parametric coordinate r and 3 control points.
 ///
-/// # 参数
-/// * `r` - 参数坐标r (0 <= r <= 1)
-/// * `control_points` - 3个控制点坐标 [p0, p1, p2]
+/// # Parameters
+/// * `r` - Parametric coordinate r (0 <= r <= 1)
+/// * `control_points` - 3 control point coordinates [p0, p1, p2]
 ///
-/// # 返回值
-/// * `[f32; 3]` - 插值得到的点坐标
-///
-/// # 形函数定义（基于图8-16）
-/// - W0 = 2(r - 0.5)(r - 1) - 对应p0（r=0端点）
-/// - W1 = 2r(r - 0.5) - 对应p1（r=1端点）
-/// - W2 = 4r(1 - r) - 对应p2（r=0.5中点）
+/// # Returns
+/// * `[f32; 3]` - Interpolated point coordinates
 fn quadratic_edge_interpolation(r: f32, control_points: &[[f32; 3]; 3]) -> [f32; 3] {
-    // 计算3个二次边形函数值
+    // Calculate 3 quadratic edge shape function values
     let w0 = 2.0 * (r - 0.5) * (r - 1.0); // W0 = 2(r-0.5)(r-1)
     let w1 = 2.0 * r * (r - 0.5); // W1 = 2r(r-0.5)
     let w2 = 4.0 * r * (1.0 - r); // W2 = 4r(1-r)
 
-    // 线性组合计算插值点坐标
+    // Linear combination to calculate interpolated point coordinates
     let mut result = [0.0; 3];
     for i in 0..3 {
-        result[i] = w0 * control_points[0][i]  // p0贡献
-                  + w1 * control_points[1][i]  // p1贡献
-                  + w2 * control_points[2][i]; // p2贡献（中点）
+        result[i] = w0 * control_points[0][i]  // p0 contribution
+                  + w1 * control_points[1][i]  // p1 contribution
+                  + w2 * control_points[2][i]; // p2 contribution (midpoint)
     }
 
     result
 }
 
-/// 标准4分细分 - 纯线性插值，1->4细分
+/// Standard 4-way subdivision - pure linear interpolation, 1->4 subdivision
 ///
-/// 实现标准的4分细分算法，每个三角形分成4个小三角形。
-/// 使用纯线性插值计算边中点，保持网格的线性特性。
+/// Implements standard 4-way subdivision algorithm, where each triangle is divided into 4 smaller triangles.
 ///
-/// # 参数
-/// * `vertices` - 原始顶点列表
-/// * `indices` - 原始索引列表
+/// # Parameters
+/// * `vertices` - Original vertex list
+/// * `indices` - Original index list
 ///
-/// # 返回值
-/// * `Ok((Vec<[f32; 3]>, Vec<u32>, HashMap<(u32, u32), u32>))` - (新顶点列表, 新索引列表, 边中点映射)
-/// * `Err(VtkError)` - 如果细分失败，返回错误信息
-///
-/// # 细分策略
-/// 每个三角形分成4个小三角形：
-/// 1. (v0, mid01, mid20) - 左上角三角形
-/// 2. (mid01, v1, mid12) - 右下角三角形
-/// 3. (mid20, mid12, v2) - 左下角三角形
-/// 4. (mid01, mid12, mid20) - 中心三角形
+/// # Returns
+/// * `Ok((Vec<[f32; 3]>, Vec<u32>, HashMap<(u32, u32), u32>))` - (new vertex list, new index list, edge midpoint mapping)
+/// * `Err(VtkError)` - If subdivision fails, returns error information
 fn smooth_4_subdivision(
     vertices: &Vec<[f32; 3]>,
     indices: &Vec<u32>,
 ) -> Result<(Vec<[f32; 3]>, Vec<u32>, HashMap<(u32, u32), u32>), VtkError> {
     let num_triangles = indices.len() / 3;
     let mut new_vertices = vertices.clone();
-    let mut new_indices = Vec::with_capacity(num_triangles * 4 * 3); // 每个三角形变成4个
+    let mut new_indices = Vec::with_capacity(num_triangles * 4 * 3);
     let mut edge_midpoints: HashMap<(u32, u32), u32> = HashMap::new();
 
     for triangle_idx in 0..num_triangles {
@@ -702,12 +585,12 @@ fn smooth_4_subdivision(
         let v1 = indices[base_idx + 1];
         let v2 = indices[base_idx + 2];
 
-        // 获取/创建线性边中点
+        // Get or create linear edge midpoints
         let mid01 = get_or_create_edge_midpoint(&mut edge_midpoints, &mut new_vertices, v0, v1);
         let mid12 = get_or_create_edge_midpoint(&mut edge_midpoints, &mut new_vertices, v1, v2);
         let mid20 = get_or_create_edge_midpoint(&mut edge_midpoints, &mut new_vertices, v2, v0);
 
-        // 标准4分细分：4个小三角形
+        // Standard 4-way subdivision: 4 small triangles
         // 1. (v0, mid01, mid20)
         new_indices.extend_from_slice(&[v0, mid01, mid20]);
 
@@ -717,49 +600,44 @@ fn smooth_4_subdivision(
         // 3. (mid20, mid12, v2)
         new_indices.extend_from_slice(&[mid20, mid12, v2]);
 
-        // 4. (mid01, mid12, mid20) - 中心三角形
+        // 4. (mid01, mid12, mid20) - Center triangle
         new_indices.extend_from_slice(&[mid01, mid12, mid20]);
     }
     Ok((new_vertices, new_indices, edge_midpoints))
 }
 
-/// 获取或创建边中点顶点
+/// Get or create edge midpoint vertex
 ///
-/// 此函数实现边中点缓存以避免重复计算。
-/// 当边的中点已存在时，它返回缓存的索引。
-/// 否则，它创建一个新的中点顶点并缓存它。
+/// # Parameters
+/// * `edge_midpoints` - Edge midpoint
+/// * `vertices` - Vertex list for adding new midpoints
+/// * `v0` - First vertex index of the edge
+/// * `v1` - Second vertex index of the edge
 ///
-/// # 参数
-/// * `edge_midpoints` - 边中点HashMap缓存
-/// * `vertices` - 用于添加新中点的顶点列表的可变引用
-/// * `v0` - 边的第一个顶点索引
-/// * `v1` - 边的第二个顶点索引
+/// # Returns
+/// * `u32` - Index of the midpoint vertex
 ///
-/// # 返回值
-/// * `u32` - 中点顶点的索引（已存在或新创建的）
+/// # Edge Ordering
+/// Edges are stored with the smaller vertex index first.
 ///
-/// # 边排序
-/// 为确保一致性，边以较小的顶点索引优先存储。
-/// 这防止了同一边在不同顶点排序下的重复中点。
-///
-/// # 中点计算
-/// 中点计算为两个端点坐标的算术平均值：
-/// `中点 = (位置0 + 位置1) / 2`
+/// # Midpoint Calculation
+/// Midpoint is calculated as the average of two endpoint coordinates:
+/// `midpoint = (position0 + position1) / 2`
 fn get_or_create_edge_midpoint(
     edge_midpoints: &mut HashMap<(u32, u32), u32>,
     vertices: &mut Vec<[f32; 3]>,
     v0: u32,
     v1: u32,
 ) -> u32 {
-    // 确保一致的边顶点排序
+    // Ensure consistent edge vertex ordering
     let edge = if v0 < v1 { (v0, v1) } else { (v1, v0) };
 
-    // 如果中点已存在，直接返回
+    // If midpoint already exists, return directly
     if let Some(&midpoint_idx) = edge_midpoints.get(&edge) {
         return midpoint_idx;
     }
 
-    // 计算中点坐标
+    // Calculate midpoint coordinates
     let pos0 = vertices[v0 as usize];
     let pos1 = vertices[v1 as usize];
     let midpoint = [
@@ -768,44 +646,33 @@ fn get_or_create_edge_midpoint(
         (pos0[2] + pos1[2]) * 0.5,
     ];
 
-    // 添加新顶点
+    // Add new vertex
     let midpoint_idx = vertices.len() as u32;
     vertices.push(midpoint);
 
-    // 记录边中点映射
+    // Record edge midpoint mapping
     edge_midpoints.insert(edge, midpoint_idx);
 
     midpoint_idx
 }
 
 // ============================================================================
-// 属性处理
+// Attribute Processing
 // ============================================================================
 
-/// 为细分网格插值属性数据
+/// Interpolate attribute data for subdivided mesh
 ///
-/// 此函数处理细分网格时所有顶点和单元格属性的插值。
-/// 它处理点属性（需要为新边中点插值）和单元格属性（需要扩展，因为每个原始单元格变成4个新三角形）。
+/// This function handles interpolation of all vertex and cell attributes when subdividing meshes.
 ///
-/// # 参数
-/// * `attributes` - 包含属性的HashMap
-/// * `edge_midpoint_map` - 从边对到其中点顶点索引的映射
-/// * `_original_vertex_count` - 原始网格中的顶点数量（未使用但保留以备将来使用）
-/// * `new_vertex_count` - 细分网格中的总顶点数量
+/// # Parameters
+/// * `attributes` - HashMap containing attributes
+/// * `edge_midpoint_map` - Mapping from edge pairs to their midpoint vertex indices
+/// * `_original_vertex_count` - Number of vertices in original mesh
+/// * `new_vertex_count` - Total number of vertices in subdivided mesh
 ///
-/// # 返回值
-/// * `Ok(HashMap)` - 具有插值值的新属性数据
-/// * `Err(VtkError)` - 如果插值失败，返回错误
-///
-/// # 属性处理
-/// - **点属性**：为新边中点顶点插值
-/// - **单元格属性**：扩展，使每个原始单元格值复制4次
-///
-/// # 支持的属性类型
-/// - 带查找表的标量数据
-/// - 颜色标量数据（RGB/RGBA）
-/// - 向量数据（3D向量）
-/// - 张量数据（3x3矩阵）
+/// # Returns
+/// * `Ok(HashMap)` - New attribute data with interpolated values
+/// * `Err(VtkError)` - If interpolation fails, returns error
 fn interpolate_attributes_for_subdivision(
     attributes: &HashMap<(String, AttributeLocation), AttributeType>,
     edge_midpoint_map: &HashMap<(u32, u32), u32>,
@@ -817,7 +684,7 @@ fn interpolate_attributes_for_subdivision(
     for ((name, location), attr) in attributes.iter() {
         match location {
             AttributeLocation::Point => {
-                // 处理点属性：需要为新边中点插值
+                // Interpolation for new edge midpoint vertices
                 let interpolated_attr = interpolate_point_attribute_for_subdivision(
                     attr,
                     edge_midpoint_map,
@@ -826,8 +693,8 @@ fn interpolate_attributes_for_subdivision(
                 new_attributes.insert((name.clone(), location.clone()), interpolated_attr);
             }
             AttributeLocation::Cell => {
-                // 单元格属性需要扩展，因为每个原始单元格现在对应多个新三角形
-                let expansion_factor = 4; // 标准细分创建4个三角形
+                // Cell attributes need expansion, since each original cell now corresponds to multiple new triangles
+                let expansion_factor = 4;
                 let expanded_attr = expand_cell_attribute_for_subdivision(attr, expansion_factor)?;
                 new_attributes.insert((name.clone(), location.clone()), expanded_attr);
             }
@@ -837,33 +704,16 @@ fn interpolate_attributes_for_subdivision(
     Ok(new_attributes)
 }
 
-/// 为细分插值点属性数据
+/// Interpolate point attribute data for subdivision
 ///
-/// 此函数处理细分过程中创建新边中点顶点时点（顶点）属性的插值。
-/// 每个中点顶点从其两个边端点顶点插值得到属性值。
+/// # Parameters
+/// * `attr` - Original attribute data to interpolate
+/// * `edge_midpoint_map` - Mapping from edge pairs to their midpoint vertex indices
+/// * `new_vertex_count` - Total number of vertices in the subdivided mesh
 ///
-/// # 参数
-/// * `attr` - 要插值的原始属性数据
-/// * `edge_midpoint_map` - 从边对到其中点顶点索引的映射
-/// * `new_vertex_count` - 细分网格中的总顶点数量
-///
-/// # 返回值
-/// * `Ok(AttributeType)` - 具有插值值的新属性数据
-/// * `Err(VtkError)` - 如果插值失败，返回错误
-///
-/// # 插值方法
-/// 对所有属性类型使用线性插值（算术平均值）：
-/// `插值值 = (值0 + 值1) / 2`
-///
-/// # 支持的属性类型
-/// - **标量**：每个顶点单个值，带可选查找表
-/// - **颜色标量**：多分量颜色值（RGB、RGBA等）
-/// - **向量**：3D向量数据（速度、法线等）
-/// - **张量**：3x3张量矩阵（应力、应变等）
-///
-/// # 错误处理
-/// - 当原始顶点数据缺失时使用默认值
-/// - 对所有数组访问进行边界检查
+/// # Returns
+/// * `Ok(AttributeType)` - New attribute data with interpolated values
+/// * `Err(VtkError)` - If interpolation fails, returns error
 fn interpolate_point_attribute_for_subdivision(
     attr: &AttributeType,
     edge_midpoint_map: &HashMap<(u32, u32), u32>,
@@ -879,27 +729,27 @@ fn interpolate_point_attribute_for_subdivision(
             let mut new_data = data.clone();
             new_data.resize(new_vertex_count, 0.0);
 
-            // 检测原始数据范围
+            // Check original data range
             let min_val = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
             let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
             let range = max_val - min_val;
 
             if range < 1e-10 {
-                // 当原始数据范围极小时（如理论解为常数的情况），使用恒定值
+                // When original data range is extremely small, use constant value
                 let avg_val = (min_val + max_val) * 0.5;
                 println!(
                     "Original scalar data range is very small ({}), using constant value {} for subdivision",
                     range, avg_val
                 );
 
-                // 为所有新边中点设置相同的值，保持"恒定"特性
+                // Set the same value for all new edge midpoints
                 for (_, &midpoint_idx) in edge_midpoint_map.iter() {
                     if (midpoint_idx as usize) < new_data.len() {
                         new_data[midpoint_idx as usize] = avg_val;
                     }
                 }
             } else {
-                // 正常插值处理
+                // Interpolation
                 for ((v0, v1), &midpoint_idx) in edge_midpoint_map.iter() {
                     let val0 = data.get(*v0 as usize).copied().unwrap_or(0.0);
                     let val1 = data.get(*v1 as usize).copied().unwrap_or(0.0);
@@ -922,7 +772,7 @@ fn interpolate_point_attribute_for_subdivision(
             let mut new_data = data.clone();
             new_data.resize(new_vertex_count, vec![1.0; *nvalues as usize]);
 
-            // 为每个边中点插值颜色值
+            // Interpolate color values for each edge midpoint
             for ((v0, v1), &midpoint_idx) in edge_midpoint_map.iter() {
                 let color0 = data
                     .get(*v0 as usize)
@@ -954,7 +804,7 @@ fn interpolate_point_attribute_for_subdivision(
             let mut new_data = data.clone();
             new_data.resize(new_vertex_count, [0.0, 0.0, 0.0]);
 
-            // 为每个边中点插值向量值
+            // Interpolate vector values for each edge midpoint
             for ((v0, v1), &midpoint_idx) in edge_midpoint_map.iter() {
                 let vec0 = data.get(*v0 as usize).copied().unwrap_or([0.0, 0.0, 0.0]);
                 let vec1 = data.get(*v1 as usize).copied().unwrap_or([0.0, 0.0, 0.0]);
@@ -976,7 +826,7 @@ fn interpolate_point_attribute_for_subdivision(
             let mut new_data = data.clone();
             new_data.resize(new_vertex_count, [0.0; 9]);
 
-            // 为每个边中点插值张量值
+            // Interpolate tensor values for each edge midpoint
             for ((v0, v1), &midpoint_idx) in edge_midpoint_map.iter() {
                 let tensor0 = data.get(*v0 as usize).copied().unwrap_or([0.0; 9]);
                 let tensor1 = data.get(*v1 as usize).copied().unwrap_or([0.0; 9]);
@@ -996,30 +846,15 @@ fn interpolate_point_attribute_for_subdivision(
     }
 }
 
-/// 为细分扩展单元格属性数据
+/// Expand cell attribute data for subdivision
 ///
-/// 由于每个原始三角形在细分过程中变成4个新三角形，
-/// 单元格属性需要相应扩展。每个原始单元格的属性值复制4次用于4个新三角形。
+/// # Parameters
+/// * `attr` - Original cell attribute data to expand
+/// * `expansion_factor` - Number of times to replicate original attributes
 ///
-/// # 参数
-/// * `attr` - 要扩展的原始单元格属性数据
-/// * `expansion_factor` - 复制原始属性的次数
-///
-/// # 返回值
-/// * `Ok(AttributeType)` - 扩展的属性数据，大小为原始的4倍
-/// * `Err(VtkError)` - 如果扩展失败，返回错误
-///
-/// # 扩展策略
-/// 每个原始单元格值简单地复制4次：
-/// `[值] -> [值, 值, 值, 值]`
-///
-/// 这保持了原始属性语义，同时确保每个新三角形具有与其父三角形相同的属性值。
-///
-/// # 支持的属性类型
-/// - **标量**：带查找表的单个值
-/// - **颜色标量**：多分量颜色数据
-/// - **向量**：3D向量数据
-/// - **张量**：3x3张量矩阵
+/// # Returns
+/// * `Ok(AttributeType)` - Expanded attribute data, size is 4 times the original
+/// * `Err(VtkError)` - If expansion fails, returns error
 fn expand_cell_attribute_for_subdivision(
     attr: &AttributeType,
     expansion_factor: usize,
@@ -1033,7 +868,7 @@ fn expand_cell_attribute_for_subdivision(
         } => {
             let mut new_data = Vec::with_capacity(data.len() * expansion_factor);
 
-            // 每个原始单元格值复制4次
+            // Each original cell value is replicated 4 times
             for &value in data.iter() {
                 for _ in 0..expansion_factor {
                     new_data.push(value);
@@ -1050,7 +885,7 @@ fn expand_cell_attribute_for_subdivision(
         AttributeType::ColorScalar { nvalues, data } => {
             let mut new_data = Vec::with_capacity(data.len() * expansion_factor);
 
-            // 每个原始单元格颜色复制4次
+            // Each original cell color is replicated 4 times
             for color in data.iter() {
                 for _ in 0..expansion_factor {
                     new_data.push(color.clone());
@@ -1065,7 +900,7 @@ fn expand_cell_attribute_for_subdivision(
         AttributeType::Vector(data) => {
             let mut new_data = Vec::with_capacity(data.len() * expansion_factor);
 
-            // 每个原始单元格向量复制4次
+            // Each original cell vector is replicated 4 times
             for &vector in data.iter() {
                 for _ in 0..expansion_factor {
                     new_data.push(vector);
@@ -1077,7 +912,7 @@ fn expand_cell_attribute_for_subdivision(
         AttributeType::Tensor(data) => {
             let mut new_data = Vec::with_capacity(data.len() * expansion_factor);
 
-            // 每个原始单元格张量复制4次
+            // Each original cell tensor is replicated 4 times
             for &tensor in data.iter() {
                 for _ in 0..expansion_factor {
                     new_data.push(tensor);
@@ -1090,34 +925,22 @@ fn expand_cell_attribute_for_subdivision(
 }
 
 // ============================================================================
-// 映射处理
+// Mapping Processing
 // ============================================================================
 
-/// 为细分网格生成三角形到单元格映射
+/// Generate triangle-to-cell mapping for subdivided mesh
 ///
-/// 细分后，每个原始三角形变成4个新三角形。
-/// 此函数创建从新三角形回到其原始父单元格的映射，保持单元格关联。
+/// # Parameters
+/// * `original_mapping` - Original triangle-to-cell mapping before subdivision
 ///
-/// # 参数
-/// * `original_mapping` - 细分前的原始三角形到单元格映射
-///
-/// # 返回值
-/// * `Vec<usize>` - 长度为原始4倍的新映射，其中每个原始单元格索引复制4次用于4个子三角形
-///
-/// # 映射策略
-/// 对于每个映射到单元格C的原始三角形，4个新三角形都映射到同一个单元格C：
-/// ```
-/// 原始: [三角形0 -> 单元格0, 三角形1 -> 单元格1, ...]
-/// 之后: [tri0_0 -> 单元格0, tri0_1 -> 单元格0, tri0_2 -> 单元格0, tri0_3 -> 单元格0,
-///        tri1_0 -> 单元格1, tri1_1 -> 单元格1, tri1_2 -> 单元格1, tri1_3 -> 单元格1, ...]
-/// ```
-///
-/// 这保持了细分操作后网格三角形和数据单元格之间的关系。
+/// # Returns
+/// * `Vec<usize>` - New mapping with length 4 times the original, where each original cell index is replicated 4 times for 4 sub-triangles
+
 fn generate_subdivided_triangle_mapping(original_mapping: &[usize]) -> Vec<usize> {
     let mut new_mapping = Vec::with_capacity(original_mapping.len() * 4);
 
     for &cell_idx in original_mapping.iter() {
-        // 每个原始三角形对应的单元格现在对应4个新三角形
+        // Each original triangle's corresponding cell now corresponds to 4 new triangles
         for _ in 0..4 {
             new_mapping.push(cell_idx);
         }
@@ -1126,32 +949,18 @@ fn generate_subdivided_triangle_mapping(original_mapping: &[usize]) -> Vec<usize
     new_mapping
 }
 
-/// 为细分网格生成默认三角形到单元格映射
+/// Generate default triangle-to-cell mapping for subdivided mesh
 ///
-/// 当原始几何数据没有三角形到单元格映射时，
-/// 此函数创建一个默认映射，其中每个原始三角形被视为自己的单元格。
-/// 细分后，每组4个子三角形映射回其父三角形索引。
+/// # Parameters
+/// * `num_original_triangles` - Number of triangles in original mesh
 ///
-/// # 参数
-/// * `num_original_triangles` - 原始网格中的三角形数量
-///
-/// # 返回值
-/// * `Vec<usize>` - 默认映射，其中三角形组映射到顺序索引
-///
-/// # 默认映射策略
-/// ```
-/// 原始三角形:  [tri0, tri1, tri2, ...]
-/// 视为单元格:  [单元格0, 单元格1, 单元格2, ...]
-/// 细分后:      [tri0_0->单元格0, tri0_1->单元格0, tri0_2->单元格0, tri0_3->单元格0,
-///               tri1_0->单元格1, tri1_1->单元格1, tri1_2->单元格1, tri1_3->单元格1, ...]
-/// ```
-///
-/// 这确保每组4个细分三角形保持与其原始父三角形的关联。
+/// # Returns
+/// * `Vec<usize>` - Default mapping where triangle groups map to sequential indices
 fn generate_default_triangle_mapping(num_original_triangles: usize) -> Vec<usize> {
     let mut mapping = Vec::with_capacity(num_original_triangles * 4);
 
     for triangle_idx in 0..num_original_triangles {
-        // 每个原始三角形对应4个新三角形
+        // Each original triangle corresponds to 4 new triangles
         for _ in 0..4 {
             mapping.push(triangle_idx);
         }
