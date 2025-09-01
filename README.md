@@ -94,6 +94,22 @@ cd data_visualization
 cargo run
 ```
 
+## Test Data
+
+### Sample VTK Files
+The repository includes several sample VTK data files in the `assets/` directory for testing:
+- `bunny.vtk` - 3D bunny model
+- `sphere_order1.vtu` and `sphere_order2.vtu` - Sphere models with different orders
+- `torus.vtu` - Torus model
+
+### Time Series Data
+Due to large file sizes, time series data is not hosted directly in the Git repository. You can download the time series sample data from:
+
+- **Google Drive**: https://drive.google.com/drive/folders/1qAVuYsR6JV8zO8XOnjt7I4SLBL4fZ-Yw?usp=drive_link
+- **Dropbox**: https://www.dropbox.com/scl/fi/n4tumgwakxyoqt1isz50x/sequence.zip?rlkey=8184dnduq94w6fwq9phdm245e&st=3khfdvk0&dl=0
+
+After downloading, extract the files to the `assets/sequence/` directory to test time series animation features.
+
 ## Usage Guide
 
 ### Basic Operations
