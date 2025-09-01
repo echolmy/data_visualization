@@ -5,6 +5,7 @@ pub mod triangulation;
 pub mod vtk;
 pub mod wave;
 pub use self::vtk::{AttributeLocation, AttributeType};
+// pub use self::color_maps::{ColorMapper, ColorMappingConfig};
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};

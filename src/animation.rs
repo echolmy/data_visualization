@@ -1,4 +1,5 @@
 // Time series animation system
+use crate::mesh::color_maps::{ColorMapper, ColorMappingConfig};
 use crate::mesh::vtk::VtkMeshExtractor;
 use bevy::prelude::*;
 use std::path::PathBuf;
@@ -322,56 +323,15 @@ fn apply_scalar_colors_to_mesh(
     scalars: &[f32],
     color_bar_config: &crate::ui::ColorBarConfig,
 ) {
-    use crate::mesh::color_maps::get_color_map;
-
-    // Get vertex count
-    let vertex_count = mesh.count_vertices();
-
-    // Ensure scalar data count matches vertex count
-    if scalars.len() != vertex_count {
-        println!(
-            "Warning: Scalar data count ({}) does not match vertex count ({})",
-            scalars.len(),
-            vertex_count
-        );
-        return;
-    }
-
-    // Calculate scalar value range
-    let (min_val, max_val) = scalars
-        .iter()
-        .fold((f32::MAX, f32::MIN), |(min, max), &val| {
-            (min.min(val), max.max(val))
-        });
-
-    // Use range from ColorBarConfig
-    let (range_min, range_max) = if color_bar_config.max_value > color_bar_config.min_value {
-        (color_bar_config.min_value, color_bar_config.max_value)
-    } else {
-        (min_val, max_val)
+    // Convert ColorBarConfig to ColorMappingConfig
+    let config = ColorMappingConfig {
+        color_map_name: color_bar_config.color_map_name.clone(),
+        min_value: color_bar_config.min_value,
+        max_value: color_bar_config.max_value,
+        use_custom_range: color_bar_config.max_value > color_bar_config.min_value,
     };
 
-    // Get currently selected color map
-    let color_map = get_color_map(&color_bar_config.color_map_name);
-
-    // Generate color data
-    let colors: Vec<[f32; 4]> = scalars
-        .iter()
-        .map(|&scalar| {
-            // Normalize scalar value to [0, 1] range
-            let normalized = if range_max > range_min {
-                ((scalar - range_min) / (range_max - range_min)).clamp(0.0, 1.0)
-            } else {
-                0.5 // Use middle value if range is 0
-            };
-
-            // Get color using color map
-            color_map.get_interpolated_color(normalized)
-        })
-        .collect();
-
-    // Update mesh vertex color attribute
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    ColorMapper::apply_scalars_to_mesh(mesh, scalars, &config);
 }
 
 /// Step 1: Trigger import of frame 0 as single file

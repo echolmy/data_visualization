@@ -2,7 +2,7 @@
 //!
 //! This module provides color bar functionality for displaying color mappings.
 use crate::mesh;
-use crate::mesh::color_maps::{get_color_map, ColorMap};
+use crate::mesh::color_maps::{get_color_map, ColorMap, ColorMapper, ColorMappingConfig};
 use bevy::prelude::*;
 use bevy_egui::*;
 
@@ -328,185 +328,13 @@ pub fn apply_custom_color_mapping(
     mesh: &mut Mesh,
     color_bar_config: &ColorBarConfig,
 ) -> Result<(), mesh::VtkError> {
-    use crate::mesh::vtk::{AttributeLocation, AttributeType};
-
-    let Some(attributes) = &geometry.attributes else {
-        println!("No attributes available for color mapping");
-        return Ok(());
+    // Convert ColorBarConfig to ColorMappingConfig
+    let config = ColorMappingConfig {
+        color_map_name: color_bar_config.color_map_name.clone(),
+        min_value: color_bar_config.min_value,
+        max_value: color_bar_config.max_value,
+        use_custom_range: true, // Always use custom range from UI
     };
 
-    // Get color map
-    let color_map = get_color_map(&color_bar_config.color_map_name);
-
-    // Try to process point scalar attributes
-    for ((name, location), attr) in attributes.iter() {
-        if let AttributeType::Scalar { num_comp, data, .. } = attr {
-            if location == &AttributeLocation::Point && *num_comp == 1 {
-                println!(
-                    "Applying custom color mapping to point scalar attribute: {}",
-                    name
-                );
-
-                // Get actual vertex count in mesh
-                let mesh_vertex_count =
-                    if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
-                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-                    {
-                        positions.len()
-                    } else {
-                        geometry.vertices.len()
-                    };
-
-                let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; mesh_vertex_count];
-
-                // Use custom value range
-                let min_val = color_bar_config.min_value;
-                let max_val = color_bar_config.max_value;
-                let range = max_val - min_val;
-
-                if range <= 0.0 {
-                    println!("Constant scalar field detected (range={}), using middle color from color map", range);
-                    // For constant fields, use the middle color of the color map
-                    let middle_color = color_map.get_interpolated_color(0.5);
-                    vertex_colors.fill(middle_color);
-
-                    mesh.insert_attribute(
-                        Mesh::ATTRIBUTE_COLOR,
-                        bevy::render::mesh::VertexAttributeValues::from(vertex_colors),
-                    );
-                    println!(
-                        "Applied middle color [{:.3}, {:.3}, {:.3}, {:.3}] to constant point field",
-                        middle_color[0], middle_color[1], middle_color[2], middle_color[3]
-                    );
-                    return Ok(());
-                }
-
-                // Calculate color for each vertex
-                for (i, &val) in data.iter().enumerate() {
-                    if i >= vertex_colors.len() {
-                        break;
-                    }
-
-                    // Normalize
-                    let normalized = ((val - min_val) / range).clamp(0.0, 1.0);
-                    let color = color_map.get_interpolated_color(normalized);
-                    vertex_colors[i] = color;
-                }
-
-                println!(
-                    "Applied colors to {} vertices (geometry has {} vertices, {} scalar values)",
-                    vertex_colors.len(),
-                    geometry.vertices.len(),
-                    data.len()
-                );
-
-                mesh.insert_attribute(
-                    Mesh::ATTRIBUTE_COLOR,
-                    bevy::render::mesh::VertexAttributeValues::from(vertex_colors),
-                );
-                println!(
-                    "Updated point scalar colors with color map: {}",
-                    color_bar_config.color_map_name
-                );
-                return Ok(());
-            }
-        }
-    }
-
-    // If no point scalars, try to process cell scalar attributes
-    for ((name, location), attr) in attributes.iter() {
-        if let AttributeType::Scalar { num_comp, data, .. } = attr {
-            if location == &AttributeLocation::Cell && *num_comp == 1 {
-                println!(
-                    "Applying custom color mapping to cell scalar attribute: {}",
-                    name
-                );
-
-                // Get actual vertex count in mesh
-                let mesh_vertex_count =
-                    if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
-                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-                    {
-                        positions.len()
-                    } else {
-                        geometry.vertices.len()
-                    };
-
-                let mut vertex_colors = vec![[1.0, 1.0, 1.0, 1.0]; mesh_vertex_count];
-
-                // Use custom value range
-                let min_val = color_bar_config.min_value;
-                let max_val = color_bar_config.max_value;
-                let range = max_val - min_val;
-
-                if range <= 0.0 {
-                    println!("Constant scalar field detected (range={}), using middle color from color map", range);
-                    // For constant fields, use the middle color of the color map
-                    let middle_color = color_map.get_interpolated_color(0.5);
-                    vertex_colors.fill(middle_color);
-
-                    mesh.insert_attribute(
-                        Mesh::ATTRIBUTE_COLOR,
-                        bevy::render::mesh::VertexAttributeValues::from(vertex_colors),
-                    );
-                    println!(
-                        "Applied middle color [{:.3}, {:.3}, {:.3}, {:.3}] to constant cell field",
-                        middle_color[0], middle_color[1], middle_color[2], middle_color[3]
-                    );
-                    return Ok(());
-                }
-
-                // Use triangle-to-cell mapping
-                if let Some(mapping) = &geometry.triangle_to_cell_mapping {
-                    for (triangle_idx, &cell_idx) in mapping.iter().enumerate() {
-                        if cell_idx >= data.len() {
-                            continue;
-                        }
-
-                        // Calculate color
-                        let val = data[cell_idx];
-                        let normalized = ((val - min_val) / range).clamp(0.0, 1.0);
-                        let color = color_map.get_interpolated_color(normalized);
-
-                        // Get triangle vertex indices and set colors
-                        let triangle_base = triangle_idx * 3;
-                        if triangle_base + 2 < geometry.indices.len() {
-                            let vertex_indices = [
-                                geometry.indices[triangle_base] as usize,
-                                geometry.indices[triangle_base + 1] as usize,
-                                geometry.indices[triangle_base + 2] as usize,
-                            ];
-
-                            for &idx in &vertex_indices {
-                                if idx < vertex_colors.len() {
-                                    vertex_colors[idx] = color;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                println!(
-                    "Applied cell colors to {} vertices (geometry has {} vertices, {} triangles, {} cells)",
-                    vertex_colors.len(),
-                    geometry.vertices.len(),
-                    geometry.indices.len() / 3,
-                    data.len()
-                );
-
-                mesh.insert_attribute(
-                    Mesh::ATTRIBUTE_COLOR,
-                    bevy::render::mesh::VertexAttributeValues::from(vertex_colors),
-                );
-                println!(
-                    "Updated cell scalar colors with color map: {}",
-                    color_bar_config.color_map_name
-                );
-                return Ok(());
-            }
-        }
-    }
-
-    println!("No suitable scalar attributes found for color mapping");
-    Ok(())
+    ColorMapper::apply_scalar_attributes_with_color_map(geometry, mesh, &config)
 }
