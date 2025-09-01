@@ -56,8 +56,8 @@ A high-performance scientific data visualization application built with Rust and
   - R: Reset camera to default position
   - **Shift + W/A/S/D/Q/E: Fast movement (10x speed)**
 - **Model Transformation**:
-  - **Alt + Left mouse drag: Rotate model**
-  - **Alt + Middle mouse drag: Translate model position**
+  - **Alt + Left mouse drag: Rotate model** (Windows/Linux) / **Option + Left mouse drag** (macOS)
+  - **Alt + Middle mouse drag: Translate model position** (Windows/Linux) / **Option + Middle mouse drag** (macOS)
 
 ### User Interface
 - **Modern GUI**: Intuitive user interface based on egui
@@ -86,13 +86,13 @@ A high-performance scientific data visualization application built with Rust and
 ### Prerequisites
 This application requires a Rust development environment. If you don't have Rust installed:
 
-1. Install Rust
+1. Install Rust from https://www.rust-lang.org/tools/install
 2. Verify installation: `rustc --version`
 
 ### Running from Source
 1. Clone the repository:
 ```bash
-git clone [repository-url]
+git clone https://github.com/echolmy/data_visualization.git
 cd data_visualization
 ```
 
